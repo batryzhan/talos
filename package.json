@@ -2,7 +2,24 @@
   "name": "talos-sim",
   "private": true,
   "type": "module",
-  "scripts": { "dev": "vite", "build": "vite build", "convert": "node tools/convert.mjs" },
-  "dependencies": { "three": "0.170.0" },
-  "devDependencies": { "vite": "5.4.11", "occt-import-js": "0.0.23", "@gltf-transform/core": "4.1.1", "@gltf-transform/functions": "4.1.1", "meshoptimizer": "0.22.0" }
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "convert": "node tools/convert.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "three": "0.170.0"
+  },
+  "devDependencies": {
+    "@gltf-transform/core": "4.1.1",
+    "@gltf-transform/functions": "4.1.1",
+    "@types/three": "0.170.0",
+    "meshoptimizer": "0.22.0",
+    "occt-import-js": "0.0.23",
+    "typescript": "5.9.3",
+    "vite": "5.4.11",
+    "vitest": "2.1.9"
+  }
 }

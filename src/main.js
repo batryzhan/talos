@@ -1,7 +1,9 @@
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { TalosRobotAgent, loadStraferModel } from './robot/TalosRobotAgent.ts';
+import { SwarmManager } from './swarm/SwarmManager.ts';
+import { runM0 } from './swarm/consensus.ts';
 
 // World is Z-up, metres. Robot forward = +X, left = +Y (right-handed).
 THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
@@ -9,12 +11,11 @@ THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
 // ───────────────────────── configuration ─────────────────────────
 const CFG = {
   maxWheelSpeed: 1.8,      // m/s at the rim at full command
-  wheelAccel: 7.0,         // m/s² wheel slew rate (traction limit)
+  turnRate: 3.2,           // rad/s at full turn command (before saturation)
   slowGain: 0.35,          // Shift multiplier
-  roller: 0.009,           // roller radius for visual spin (m)
-  halfX: 0.216, halfY: 0.2266, // chassis footprint half extents (from CAD)
+  liftSpeed: 0.08,         // m/s manual lift command (Z / X)
   field: 3.6576,           // 12 ft square field
-  start: { x: 0, y: 0, h: 0 },
+  start: { x: 0, y: 0, theta: 0 },
 };
 
 // ───────────────────────── renderer / scene ─────────────────────────
@@ -106,58 +107,18 @@ addBox(0.5, -1.1, 0.3, 0.3, 0.3, 0xd64545);
 addBox(-1.1, 0.9, 0.25, 0.25, 0.6, 0x7a58d6);
 addBox(1.3, -0.2, 0.15, 0.9, 0.12, 0x3fb97a);
 
-// ───────────────────────── robot model ─────────────────────────
-const robot = new THREE.Group(); // pose root: footprint centre on the floor
-scene.add(robot);
-const wheels = []; // {id, node, R, k, x, y, theta, u, rollers[]}
-
+// ───────────────────────── robot (src/robot/TalosRobotAgent) ─────────────────────────
 const loadbar = document.getElementById('loadbar');
 const loadtext = document.getElementById('loadtext');
-const gltf = await new Promise((res, rej) => new GLTFLoader().load('/robot.glb', res, e => {
-  if (e.total) { const p = e.loaded / e.total; loadbar.style.width = (p * 100).toFixed(0) + '%'; loadtext.textContent = `Загрузка модели… ${(e.loaded / 1e6).toFixed(1)} / ${(e.total / 1e6).toFixed(1)} МБ`; }
-}, rej));
-
-const model = gltf.scene;
-model.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-robot.add(model);
-const wheelNodes = []; model.traverse(o => { if (o.name.startsWith('wheel_')) wheelNodes.push(o); });
-wheelNodes.forEach(n => {
-  if (!n.name.startsWith('wheel_')) return;
-  const ex = n.userData;
-  const ax = Math.sign(ex.axisXY[0]) * Math.SQRT1_2, ay = Math.SQRT1_2; // CAD rollers are exactly 45°
-  const w = {
-    id: ex.id, node: n, R: ex.radius,
-    k: ay / ax,                           // contact-roller axis slope → mecanum constraint
-    a: new THREE.Vector2(ax, ay),
-    f: new THREE.Vector2(-ay, ax),        // free rolling direction of the contact roller
-    x: n.position.x, y: n.position.y,
-    theta: 0, u: 0, rollers: [],
-  };
-  n.children.forEach(r => {
-    if (!r.name.startsWith('roller_')) return;
-    const axis = new THREE.Vector3(...r.userData.axis); if (axis.y < 0) axis.negate();
-    w.rollers.push({ node: r, axis, phi0: Math.atan2(r.position.z, r.position.x), angle: 0 });
-  });
-  wheels.push(w);
+const strafer = await loadStraferModel('/robot.glb', (loaded, total) => {
+  loadbar.style.width = (loaded / total * 100).toFixed(0) + '%';
+  loadtext.textContent = `Загрузка модели… ${(loaded / 1e6).toFixed(1)} / ${(total / 1e6).toFixed(1)} МБ`;
 });
-const ORDER = ['FL', 'FR', 'RL', 'RR'];
-wheels.sort((p, q) => ORDER.indexOf(p.id) - ORDER.indexOf(q.id));
-console.log('wheels', wheels.map(w => `${w.id} k=${w.k.toFixed(3)} rollers=${w.rollers.length}`).join(' | '));
 
-// mecanum kinematics.  wheel rim speed u = vx − ω·y + k·(vy + ω·x)
-const IK = wheels.map(w => [1, w.k, -w.y + w.k * w.x]);
-function inv3(m) {
-  const [a, b, c, d, e, f, g, h, i] = m.flat();
-  const A = e * i - f * h, B = -(d * i - f * g), C = d * h - e * g;
-  const det = a * A + b * B + c * C;
-  return [[A, -(b * i - c * h), b * f - c * e], [B, a * i - c * g, -(a * f - c * d)], [C, -(a * h - b * g), a * e - b * d]].map(r => r.map(v => v / det));
-}
-const MtM = [0, 1, 2].map(i => [0, 1, 2].map(j => IK.reduce((s, r) => s + r[i] * r[j], 0)));
-const MtMinv = inv3(MtM);
-function forwardKin(u) { // least squares: wheel speeds → body twist
-  const b = [0, 1, 2].map(i => IK.reduce((s, r, wi) => s + r[i] * u[wi], 0));
-  return MtMinv.map(r => r[0] * b[0] + r[1] * b[1] + r[2] * b[2]);
-}
+const agent = new TalosRobotAgent({ id: 1, model: strafer, pose: CFG.start });
+scene.add(agent.root);
+const OMEGA_MAX = agent.geometry.omegaMax;
+const ORDER = ['FL', 'FR', 'RL', 'RR'];
 
 // ───────────────────────── input ─────────────────────────
 const keys = new Set();
@@ -190,23 +151,16 @@ function readInput() {
   strafe = THREE.MathUtils.clamp(strafe, -1, 1); turn = THREE.MathUtils.clamp(turn, -1, 1);
   const m = Math.hypot(f, strafe); if (m > 1) { f /= m; strafe /= m; }
   const g = down('ShiftLeft') || down('ShiftRight') ? CFG.slowGain : 1;
-  return { f: f * g, s: strafe * g, t: turn * g, gain: g };
+  return { f: f * g, s: strafe * g, t: turn * g, gain: g, lift: axis('KeyZ', 'KeyX') };
 }
 
 // ───────────────────────── physics ─────────────────────────
-const pose = { x: 0, y: 0, h: 0 };
-const twist = { vx: 0, vy: 0, w: 0 };
-const WMAX = CFG.maxWheelSpeed;
-const TURN_RATE = 3.2;   // rad/s at full turn command (before saturation)
-
 function resetRobot() {
-  Object.assign(pose, { x: CFG.start.x, y: CFG.start.y, h: CFG.start.h });
-  Object.assign(twist, { vx: 0, vy: 0, w: 0 });
-  wheels.forEach(w => { w.u = 0; });
+  agent.reset(CFG.start);
 }
 
-function collide() {
-  const c = Math.cos(pose.h), s = Math.sin(pose.h);
+function collide(pose, fp) {
+  const c = Math.cos(pose.theta), s = Math.sin(pose.theta);
   for (let it = 0; it < 4; it++) {
     let hit = false;
     for (const b of colliders) {
@@ -215,7 +169,7 @@ function collide() {
       const axes = [[1, 0], [0, 1], [c, s], [-s, c]];
       let best = Infinity, nx = 0, ny = 0, sep = false;
       for (const [ax, ay] of axes) {
-        const rr = CFG.halfX * Math.abs(c * ax + s * ay) + CFG.halfY * Math.abs(-s * ax + c * ay);
+        const rr = fp.halfX * Math.abs(c * ax + s * ay) + fp.halfY * Math.abs(-s * ax + c * ay);
         const rb = b.hx * Math.abs(ax) + b.hy * Math.abs(ay);
         const d = dx * ax + dy * ay;
         const ov = rr + rb - Math.abs(d);
@@ -228,47 +182,10 @@ function collide() {
   }
 }
 
-function step(dt, inp) {
-  // desired body twist → wheel targets (with saturation scaling)
-  const cmd = [inp.f * WMAX, inp.s * WMAX, inp.t * TURN_RATE];
-  let tgt = IK.map(r => r[0] * cmd[0] + r[1] * cmd[1] + r[2] * cmd[2]);
-  const peak = Math.max(...tgt.map(Math.abs));
-  const lim = WMAX * inp.gain;
-  if (peak > lim) tgt = tgt.map(v => v * lim / peak);
-  // wheel acceleration limit
-  wheels.forEach((w, i) => {
-    const d = tgt[i] - w.u, m = CFG.wheelAccel * dt;
-    w.u += Math.abs(d) <= m ? d : Math.sign(d) * m;
-  });
-  const [vx, vy, om] = forwardKin(wheels.map(w => w.u));
-  twist.vx = vx; twist.vy = vy; twist.w = om;
-  const c = Math.cos(pose.h), s = Math.sin(pose.h);
-  pose.x += (vx * c - vy * s) * dt;
-  pose.y += (vx * s + vy * c) * dt;
-  pose.h += om * dt;
-  collide();
-
-  // wheel + roller animation
-  for (const w of wheels) {
-    w.theta += (w.u / w.R) * dt;
-    const vcx = vx - om * w.y, vcy = vy + om * w.x;       // chassis velocity at wheel
-    const slip = -(w.u - vcx) * w.a.y - vcy * w.a.x;      // free-roller surface speed (m/s)
-    const spin = slip / CFG.roller;
-    for (const r of w.rollers) {
-      let off = r.phi0 - w.theta + Math.PI / 2;           // angular distance from the floor contact
-      off = Math.atan2(Math.sin(off), Math.cos(off));
-      if (Math.abs(off) < 0.33) r.angle += spin * dt;     // only the roller touching the ground turns
-    }
-  }
-}
-
-function applyPose() {
-  robot.position.set(pose.x, pose.y, 0);
-  robot.rotation.set(0, 0, pose.h);
-  for (const w of wheels) {
-    w.node.rotation.set(0, w.theta, 0);
-    for (const r of w.rollers) r.node.quaternion.setFromAxisAngle(r.axis, r.angle);
-  }
+function applyInput(inp) {
+  // formula 14 + uniform saturation inside the agent; Shift scales ω_max (same as the old prototype)
+  agent.setTwistCommand({ vx: inp.f * CFG.maxWheelSpeed, vy: inp.s * CFG.maxWheelSpeed, omega: inp.t * CFG.turnRate }, inp.gain);
+  agent.setLiftCommand(inp.lift * CFG.liftSpeed * inp.gain);
 }
 
 // ───────────────────────── camera ─────────────────────────
@@ -278,7 +195,7 @@ function setCam(i, silent) {
   state.cam = i;
   const off = camera.position.clone().sub(controls.target);
   if (i === 1) { // behind the robot
-    const d = Math.max(1.3, off.length()), az = pose.h + Math.PI;
+    const d = Math.max(1.3, off.length()), az = agent.pose.theta + Math.PI;
     camera.position.set(controls.target.x + Math.cos(az) * d * 0.85, controls.target.y + Math.sin(az) * d * 0.85, controls.target.z + d * 0.5);
   } else if (i === 2) { // top down
     const d = Math.max(2.4, off.length());
@@ -289,16 +206,17 @@ function setCam(i, silent) {
 }
 
 function updateCamera() {
-  camTarget.set(pose.x, pose.y, 0.08);
+  const pose = agent.pose;
+  camTarget.set(pose.x, pose.y, 0.12);
   const delta = camTarget.clone().sub(controls.target);
   controls.target.add(delta); camera.position.add(delta);
   if (state.cam === 1) { // rotate with the robot around the vertical axis
-    const dh = pose.h - lastHeading;
+    const dh = pose.theta - lastHeading;
     const rel = camera.position.clone().sub(controls.target);
     const c = Math.cos(dh), s = Math.sin(dh);
     camera.position.set(controls.target.x + rel.x * c - rel.y * s, controls.target.y + rel.x * s + rel.y * c, camera.position.z);
   }
-  lastHeading = pose.h;
+  lastHeading = pose.theta;
   if (state.cam === 2) { controls.minPolarAngle = controls.maxPolarAngle = 0.0001; }
   else { controls.minPolarAngle = 0; controls.maxPolarAngle = Math.PI / 2 - 0.02; }
   controls.update();
@@ -324,39 +242,44 @@ function updateHud(inp) {
     const code = k.dataset.k; k.classList.toggle('on', code === 'ShiftLeft' ? (down('ShiftLeft') || down('ShiftRight')) : down(code));
   });
   const now = performance.now(); if (now - hudT < 66) return; hudT = now;
+  const { pose, twist } = agent;
   const sp = Math.hypot(twist.vx, twist.vy);
   el('t-speed').textContent = sp.toFixed(2) + ' м/с';
-  el('t-head').textContent = ((((pose.h * 180 / Math.PI) % 360) + 360) % 360).toFixed(0) + '°';
+  el('t-head').textContent = ((((pose.theta * 180 / Math.PI) % 360) + 360) % 360).toFixed(0) + '°';
   el('t-pos').textContent = pose.x.toFixed(2) + ', ' + pose.y.toFixed(2) + ' м';
   el('t-gain').textContent = (inp.gain * 100).toFixed(0) + '%';
-  for (const w of wheels) {
-    const rpm = w.u / w.R * 60 / (2 * Math.PI), p = THREE.MathUtils.clamp(w.u / WMAX, -1, 1);
-    const c = wcells[w.id]; c.span.textContent = rpm.toFixed(0) + ' об/мин';
+  const tl = el('t-lift'); if (tl) tl.textContent = (agent.lift.h * 1000).toFixed(0) + ' мм · ' + agent.lift.current.toFixed(1) + ' А';
+  const rpm = agent.wheelRpm();
+  agent.wheelRates.forEach((w, i) => {
+    const p = THREE.MathUtils.clamp(w / OMEGA_MAX, -1, 1);
+    const c = wcells[ORDER[i]]; c.span.textContent = rpm[i].toFixed(0) + ' об/мин';
     c.bar.style.left = p >= 0 ? '50%' : (50 + p * 50) + '%'; c.bar.style.width = Math.abs(p) * 50 + '%';
     c.bar.style.background = p >= 0 ? 'var(--pos)' : 'var(--neg)';
-  }
+  });
 }
 
 // ───────────────────────── main loop ─────────────────────────
 addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
-resetRobot(); updateHelp(); applyPose();
-camTarget.set(pose.x, pose.y, 0.08); controls.target.copy(camTarget);
+resetRobot(); updateHelp(); agent.syncVisuals();
+camTarget.set(agent.pose.x, agent.pose.y, 0.12); controls.target.copy(camTarget);
 setCam(0, true);
 loadtext.textContent = 'Готово'; el('loader').classList.add('done');
 canvas.focus();
 
 let prev = performance.now();
 renderer.setAnimationLoop(now => {
-  const frame = Math.min((now - prev) / 1000, 0.05); prev = now;
+  const frame = THREE.MathUtils.clamp((now - prev) / 1000, 0, 0.05); prev = now;
   const inp = readInput();
+  applyInput(inp);
   const n = Math.max(1, Math.ceil(frame / (1 / 240)));
-  for (let i = 0; i < n; i++) step(frame / n, inp);
-  applyPose();
+  for (let i = 0; i < n; i++) agent.step(frame / n, collide);
+  agent.syncVisuals();
   updateCamera();
-  sun.position.copy(robot.position).add(SUN_OFFSET); sun.target.position.copy(robot.position);
+  sun.position.copy(agent.root.position).add(SUN_OFFSET); sun.target.position.copy(agent.root.position);
   updateHud(inp);
   renderer.render(scene, camera);
 });
 
-// debug / test hook
-window.__sim = { step, resetRobot, model, scene, pose, twist, wheels, keys, camera, controls, setCam, state };
+// debug / test hook (console): window.__sim.agent, window.__talos.SwarmManager, …
+window.__sim = { agent, resetRobot, model: strafer, scene, pose: agent.pose, twist: agent.twist, keys, camera, controls, setCam, state };
+window.__talos = { THREE, scene, strafer, agent, TalosRobotAgent, SwarmManager, runM0, collide };
