@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Talos · Strafer 3D симулятор</title>
+  <style>
+    :root {
+      --bg: #0d1117; --panel: rgba(18, 23, 31, .72); --line: rgba(255,255,255,.10);
+      --text: #e6edf3; --dim: #8b98a8; --accent: #f2b233; --pos: #3fb950; --neg: #f85149;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+      font: 13px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overflow: hidden; }
+    canvas#view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; outline: none; }
+    .panel { position: fixed; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+      backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); padding: 12px 14px; user-select: none; }
+    h1 { margin: 0 0 8px; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+    #telemetry { top: 14px; left: 14px; min-width: 210px; }
+    #telemetry dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 14px; margin: 0; }
+    #telemetry dt { color: var(--dim); }
+    #telemetry dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+    #wheels { top: 14px; right: 14px; width: 250px; }
+    .wgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .wcell { background: rgba(255,255,255,.04); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+    .wcell b { font-size: 11px; color: var(--dim); font-weight: 600; letter-spacing: .06em; }
+    .wcell span { float: right; font-variant-numeric: tabular-nums; font-size: 12px; }
+    .bar { position: relative; height: 6px; margin-top: 6px; background: rgba(255,255,255,.08); border-radius: 3px; overflow: hidden; }
+    .bar i { position: absolute; top: 0; bottom: 0; left: 50%; width: 0; background: var(--pos); }
+    .bar::after { content: ""; position: absolute; left: 50%; top: -1px; bottom: -1px; width: 1px; background: rgba(255,255,255,.35); }
+    .front { text-align: center; color: var(--dim); font-size: 10px; letter-spacing: .12em; margin-bottom: 6px; }
+    #help { bottom: 14px; left: 50%; transform: translateX(-50%); display: flex; gap: 22px; flex-wrap: wrap; justify-content: center; padding: 10px 16px; max-width: calc(100% - 28px); }
+    #help div { display: flex; align-items: center; gap: 6px; color: var(--dim); white-space: nowrap; }
+    kbd { display: inline-block; min-width: 22px; padding: 2px 6px; text-align: center; font: 600 11px ui-monospace, monospace;
+      color: var(--text); background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.18); border-bottom-width: 2px; border-radius: 5px; transition: .06s; }
+    kbd.on { background: var(--accent); color: #111; border-color: var(--accent); }
+    #loader { position: fixed; inset: 0; display: grid; place-items: center; background: var(--bg); z-index: 10; transition: opacity .5s; }
+    #loader.done { opacity: 0; pointer-events: none; }
+    #loader .box { width: min(360px, 80vw); text-align: center; }
+    #loader .track { height: 4px; background: rgba(255,255,255,.1); border-radius: 2px; margin-top: 14px; overflow: hidden; }
+    #loader .track i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .15s; }
+    #toast { position: fixed; top: 16px; left: 50%; transform: translate(-50%, -20px); opacity: 0; padding: 6px 14px; border-radius: 20px;
+      background: var(--panel); border: 1px solid var(--line); transition: .25s; pointer-events: none; }
+    #toast.show { opacity: 1; transform: translate(-50%, 0); }
+    body.nohud .panel { display: none; }
+    @media (max-width: 760px) { #wheels { display: none; } #help { gap: 10px; font-size: 11px; } }
+  </style>
+  <script type="module" crossorigin src="/assets/index-Dvh5ptBm.js"></script>
+</head>
+<body>
+  <canvas id="view" tabindex="0"></canvas>
+
+  <div id="loader"><div class="box"><h1>Talos · Strafer</h1><div id="loadtext">Загрузка модели…</div><div class="track"><i id="loadbar"></i></div></div></div>
+  <div id="toast"></div>
+
+  <div id="telemetry" class="panel">
+    <h1>Talos · Strafer</h1>
+    <dl>
+      <dt>Скорость</dt><dd id="t-speed">0.00 м/с</dd>
+      <dt>Курс</dt><dd id="t-head">0°</dd>
+      <dt>Позиция</dt><dd id="t-pos">0.00, 0.00 м</dd>
+      <dt>Режим A/D</dt><dd id="t-mode">стрейф</dd>
+      <dt>Камера</dt><dd id="t-cam">орбита</dd>
+      <dt>Мощность</dt><dd id="t-gain">100%</dd>
+    </dl>
+  </div>
+
+  <div id="wheels" class="panel">
+    <h1>Колёса</h1>
+    <div class="front">▲ ВПЕРЁД</div>
+    <div class="wgrid" id="wgrid"></div>
+  </div>
+
+  <div id="help" class="panel">
+    <div><kbd data-k="KeyW">W</kbd><kbd data-k="KeyS">S</kbd> вперёд / назад</div>
+    <div><kbd data-k="KeyA">A</kbd><kbd data-k="KeyD">D</kbd> <span id="h-ad">влево / вправо (стрейф)</span></div>
+    <div><kbd data-k="KeyQ">Q</kbd><kbd data-k="KeyE">E</kbd> <span id="h-qe">поворот</span></div>
+    <div><kbd data-k="ShiftLeft">Shift</kbd> медленно</div>
+    <div><kbd data-k="KeyM">M</kbd> A/D: стрейф ⇄ поворот</div>
+    <div><kbd data-k="KeyC">C</kbd> камера</div>
+    <div><kbd data-k="KeyR">R</kbd> сброс</div>
+    <div><kbd data-k="KeyH">H</kbd> скрыть HUD</div>
+    <div>ЛКМ — вращать · колесо — зум</div>
+  </div>
+
+</body>
+</html>
