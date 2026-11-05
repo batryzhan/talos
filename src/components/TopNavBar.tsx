@@ -1,0 +1,2 @@
+export const modes=['[01 // STRAFER CALIBRATION]','[02 // HEAVY CONSTRUCTION]','[03 // INDUSTRIAL FACTORY]','[04 // BENCHMARK M0]'];
+export function TopNavBar({mode,onChange}:{mode:number;onChange:(m:number)=>void}){return <nav aria-label="Mission selection"><b>TALOS <small>OPERATIONS CONSOLE</small></b>{modes.map((s,i)=><button aria-current={mode===i?'page':undefined} className={mode===i?'active':''} onClick={()=>onChange(i)} key={s}>{s}</button>)}</nav>;}

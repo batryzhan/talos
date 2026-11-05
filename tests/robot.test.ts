@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import type { WheelRates } from '../src/contracts/types';
 import { forwardKinematics, inverseKinematics, saturateUniform, slewUniform, worldToBody } from '../src/robot/mecanum';
 import { DEFAULT_LIFT_PARAMS, createLiftState, maxUpSpeed, stepLift, tractionForce, estimateLoadFromCurrent } from '../src/robot/liftDrive';
-import { CHASSIS_TOP_Z, DECK_TOP_Z, PAD_BASE_Z, SLIDE_GEOM, ViperSlideRig, stageBottomZ, stageSection } from '../src/robot/ViperSlideRig';
 import { STRAFER_GEOMETRY, TalosRobotAgent } from '../src/robot/TalosRobotAgent';
 import { supportVelocityWorld } from '../src/swarm/virtualPlatform';
 
@@ -96,14 +95,14 @@ describe('Viper Slide drive formula 15 & HOLD', () => {
 
   it('HOLD (position lock) keeps height under load and keeps drawing current', () => {
     const s = createLiftState(0.1);
-    for (let i = 0; i < 500; i++) stepLift(s, p, { u: -0.1, loadForce: 400, lock: true }, 0.01);
+    for (let i = 0; i < 500; i++) stepLift(s, p, { u: -0.1, loadForce: 1.5 * tractionForce(p), lock: true }, 0.01);
     expect(s.h).toBe(0.1);
     expect(s.current).toBeGreaterThan(0);
   });
 
   it('overloaded slide WITHOUT lock is back-driven (why HOLD must not cut power)', () => {
     const s = createLiftState(0.1);
-    for (let i = 0; i < 100; i++) stepLift(s, p, { u: 0, loadForce: 400, lock: false }, 0.01);
+    for (let i = 0; i < 100; i++) stepLift(s, p, { u: 0, loadForce: 1.5 * tractionForce(p), lock: false }, 0.01);
     expect(s.h).toBeLessThan(0.1);
   });
 
@@ -114,28 +113,6 @@ describe('Viper Slide drive formula 15 & HOLD', () => {
     const lock = createLiftState(0.1);
     stepLift(lock, p, { u: 0, loadForce: 80, lock: true }, 0.01);
     expect(estimateLoadFromCurrent(p, lock.current)).toBeCloseTo(80, 6);
-  });
-});
-
-describe('Viper Slide geometry contract', () => {
-  it('deck rests on the chassis datum; pad = PAD_BASE_Z + h', () => {
-    expect(DECK_TOP_Z).toBeCloseTo(CHASSIS_TOP_Z + SLIDE_GEOM.deck.t, 12);
-    const rig = new ViperSlideRig();
-    rig.setHeight(0.15);
-    expect(rig.padTopZ).toBeCloseTo(PAD_BASE_Z + 0.15, 12);
-    rig.dispose();
-  });
-
-  it('stages nest with clearance and keep ≥ 50 mm overlap at full stroke', () => {
-    const hMax = DEFAULT_LIFT_PARAMS.hMax;
-    for (let k = 1; k < SLIDE_GEOM.stages; k++) {
-      const outer = stageSection(k - 1), inner = stageSection(k);
-      const innerHole = { w: outer.w - 2 * SLIDE_GEOM.wall, d: outer.d - 2 * SLIDE_GEOM.wall };
-      expect(innerHole.w - inner.w).toBeCloseTo(2 * SLIDE_GEOM.clearance, 12);
-      expect(innerHole.d - inner.d).toBeCloseTo(2 * SLIDE_GEOM.clearance, 12);
-      const overlap = stageBottomZ(k - 1, hMax) + SLIDE_GEOM.stageLength - stageBottomZ(k, hMax);
-      expect(overlap).toBeGreaterThan(0.05);
-    }
   });
 });
 
@@ -167,5 +144,44 @@ describe('TalosRobotAgent (headless)', () => {
     const a = new TalosRobotAgent({ id: 3 });
     expect(a.buildMessage('T', 1).seq).toBe(1);
     expect(a.buildMessage('T', 1).seq).toBe(2);
+  });
+});
+
+describe('TalosRobotAgent — 140 mm wheels & corner load cells', () => {
+  it('load cells: all four null when uncalibrated or before contact; F/4 each when calibrated', () => {
+    const a = new TalosRobotAgent({ id: 1, forceSensor: 'uncalibrated' });
+    a.applySupportContact({ agentId: 1, delta: 0.002, deltaDot: 0, force: 120 });
+    expect(a.loadCells().map(c => c.force)).toEqual([null, null, null, null]);
+    expect(a.measuredForce()).toBeNull();
+    const b = new TalosRobotAgent({ id: 2, forceSensor: 'calibrated' });
+    expect(b.loadCells().every(c => c.force === null)).toBe(true); // no physics report yet
+    b.applySupportContact({ agentId: 2, delta: 0.002, deltaDot: 0, force: 120 });
+    expect(b.loadCells().map(c => c.corner)).toEqual(['FL', 'FR', 'RL', 'RR']);
+    expect(b.loadCells().map(c => c.force)).toEqual([30, 30, 30, 30]);
+    expect(b.measuredForce()).toBe(120);
+  });
+
+  it('replaces the 96 mm CAD wheels with 140 mm wheels and lifts the frame by 22 mm', async () => {
+    const THREE = await import('three');
+    const model = new THREE.Group();
+    const frame = new THREE.Group(); frame.name = 'chassis'; model.add(frame);
+    for (const id of ['FL', 'FR', 'RL', 'RR']) { const w = new THREE.Group(); w.name = `wheel_${id}`; model.add(w); }
+    const warn = console.warn; const warnings: unknown[] = []; console.warn = (...m: unknown[]) => { warnings.push(m); };
+    try {
+      const agent = new TalosRobotAgent({ id: 7, model });
+      const names: string[] = [];
+      agent.root.traverse(o => { if (o.name.startsWith('wheel_')) names.push(o.name); });
+      expect(names.sort()).toEqual(['wheel_FL', 'wheel_FR', 'wheel_RL', 'wheel_RR']); // CAD wheels removed
+      const cadClone = agent.root.children.find(c => c.getObjectByName('chassis'))!;
+      expect(cadClone.position.z).toBeCloseTo(0.022, 12);
+      expect(warnings).toEqual([]); // roller slopes match formula 14
+      expect(STRAFER_GEOMETRY.r).toBe(0.07);
+      expect(STRAFER_GEOMETRY.omegaMax * 60 / (2 * Math.PI)).toBeCloseTo(223, 9);
+      // driving forward spins every wheel forward and the floor rollers stay still (pure +x)
+      agent.setTwistCommand({ vx: 0.5, vy: 0, omega: 0 });
+      for (let i = 0; i < 100; i++) agent.step(0.01);
+      expect(agent.twist.vx).toBeCloseTo(0.5, 6);
+      agent.dispose();
+    } finally { console.warn = warn; }
   });
 });

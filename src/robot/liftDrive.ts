@@ -15,21 +15,22 @@ export const G0 = 9.81;
 export const BUS_VOLTAGE = 12;
 
 /**
- * Default: 2 × goBILDA 5203 Yellow Jacket (19.2:1, 312 rpm, 2.38 N·m output stall) on a 32 mm spool.
- * Stall force ≈ 2·0.8·19.2·0.124/0.016 ≈ 238 N, unloaded linear speed ≈ 0.52 m/s.
+ * Four-corner gantry: one goBILDA 5203 Yellow Jacket (19.2:1, 312 rpm, 2.38 N·m output stall) per
+ * column on a 32 mm spool. Stall force ≈ 4·0.8·19.2·0.124/0.016 ≈ 476 N, unloaded ≈ 0.52 m/s.
+ * Stroke 0…0.16 m: two-section columns keep ≥ 44 mm stage overlap at h_max (ViperSlideRig).
  */
 export const DEFAULT_LIFT_PARAMS: LiftDriveParams = {
   hMin: 0,
-  hMax: 0.24,
+  hMax: 0.16,
   gearRatio: 19.2,
   efficiency: 0.8,
   motorStallTorque: 0.124,
   motorFreeSpeed: 627,
   stallCurrent: 9.2,
   freeCurrent: 0.25,
-  motors: 2,
+  motors: 4,
   spoolRadius: 0.016,
-  carriageMass: 0.9,
+  carriageMass: 2.6,
   vMax: 0.12,
   aMax: 0.6,
 };

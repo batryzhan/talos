@@ -56,17 +56,24 @@ export class NeighborTable {
   }
 }
 
-/** Broadcast medium over a fixed topology. Agent ids are 1..N, graph vertices 0..N−1. */
+/**
+ * Broadcast medium over a fixed topology. Graph vertices 0..N−1 map to agent ids `ids[v]`
+ * (default 1..N). Ring order = order of `ids`.
+ */
 export class RadioNetwork {
   readonly edges: Edge[];
+  readonly ids: number[];
+  readonly n: number;
   private queue: InFlight[] = [];
   /** Edges (agent ids, i<j) that delivered in the last tick. */
   lastActiveEdges: [number, number][] = [];
   sent = 0;
   dropped = 0;
 
-  constructor(readonly n: number, public params: NetworkParams, private readonly rng: Rng) {
-    this.edges = buildEdges(n, params.topology);
+  constructor(nOrIds: number | readonly number[], public params: NetworkParams, private readonly rng: Rng) {
+    this.ids = typeof nOrIds === 'number' ? Array.from({ length: nOrIds }, (_, i) => i + 1) : [...nOrIds];
+    this.n = this.ids.length;
+    this.edges = buildEdges(this.n, params.topology);
   }
 
   /**
@@ -77,7 +84,7 @@ export class RadioNetwork {
     this.lastActiveEdges = [];
     for (const [a, b] of this.edges) {
       const up = !this.rng.bernoulli(lossP);  // always draw → same stream regardless of silence
-      const ia = a + 1, ib = b + 1;
+      const ia = this.ids[a], ib = this.ids[b];
       const ma = outbox.get(ia), mb = outbox.get(ib);
       if (!up) { if (ma) this.dropped++; if (mb) this.dropped++; continue; }
       if (ma) { this.queue.push({ to: ib, msg: ma, deliverAt: now + this.params.delay }); this.sent++; }
@@ -97,8 +104,14 @@ export class RadioNetwork {
 
   /** Graph neighbours (agent ids) of agent `id` in the loss-free topology. */
   neighborsOf(id: number): number[] {
-    const v = id - 1, out: number[] = [];
-    for (const [a, b] of this.edges) { if (a === v) out.push(b + 1); else if (b === v) out.push(a + 1); }
+    const v = this.ids.indexOf(id), out: number[] = [];
+    if (v < 0) return out;
+    for (const [a, b] of this.edges) { if (a === v) out.push(this.ids[b]); else if (b === v) out.push(this.ids[a]); }
     return out;
+  }
+
+  /** Unique edges as agent-id pairs. */
+  idEdges(): [number, number][] {
+    return this.edges.map(([a, b]) => [this.ids[a], this.ids[b]]);
   }
 }

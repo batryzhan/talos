@@ -144,8 +144,10 @@ export interface SupportContactInput {
   padZ: number;
   /** Vertical velocity of the pad (m/s) = ḣ_i. */
   padVel: number;
-  /** Pad half size (m), square pad. */
+  /** Pad half size (m), square-equivalent (min of padHalfExtents for rectangular pads). */
   padHalfSize: number;
+  /** v2: rectangular cargo-plate half extents in the ROBOT frame (m). Optional for v1 consumers. */
+  padHalfExtents?: Vec2;
   /** Effective support stiffness k_i (N/m) and damping c_i (N·s/m) for F_i = k max(0,δ) + c δ̇ 𝟙(δ>0). */
   stiffness: number;
   damping: number;
@@ -311,4 +313,178 @@ export interface RunLogRecord {
   E_traj?: number;
   TSR?: number;
   SSR?: number;
+}
+
+// ═════════════════════════ v2.0 additions (CLAUDE.md v2 §3–§4) — additive only ═════════════════════════
+
+// ───────────────────────── Xbox 360 gamepad ─────────────────────────
+
+/** Standard-mapping button names (W3C Gamepad "standard" layout, Xbox 360 labels). */
+export type XboxButton =
+  | 'A' | 'B' | 'X' | 'Y' | 'LB' | 'RB' | 'LT' | 'RT' | 'BACK' | 'START' | 'LS' | 'RS'
+  | 'DPAD_UP' | 'DPAD_DOWN' | 'DPAD_LEFT' | 'DPAD_RIGHT' | 'GUIDE';
+
+/** Who the sticks drive: one robot, or the whole team as a virtual platform (formula 16). */
+export type GamepadFocus = { kind: 'agent'; agentId: number } | { kind: 'swarm'; teamId: string };
+
+export type CameraMode = 'orbit' | 'follow' | 'centroid' | 'topdown';
+export type ScenarioId = 'construction' | 'factory' | 'lab';
+
+/** Live gamepad state for the React HUD (Agent B renders it as an SVG Xbox 360 pad). */
+export interface GamepadTelemetry {
+  connected: boolean;
+  id: string | null;
+  /** Gamepad API mapping ('standard' expected). */
+  mapping: string;
+  /** Sticks after radial deadzone + response curve, each in [−1, 1]. y is UP-positive. */
+  leftStick: Vec2;
+  rightStick: Vec2;
+  /** Raw stick values (before deadzone) for the HUD's stick-deflection dots. */
+  leftStickRaw: Vec2;
+  rightStickRaw: Vec2;
+  /** Triggers after deadzone/curve, [0, 1]. */
+  leftTrigger: number;
+  rightTrigger: number;
+  /** Buttons currently held. */
+  pressed: XboxButton[];
+  focus: GamepadFocus;
+  controller: ControllerKind;
+  camera: CameraMode;
+  scenario: ScenarioId;
+  /** Power limit 0.25 / 0.5 / 0.75 / 1. */
+  powerLimit: number;
+  paused: boolean;
+  rumbleSupported: boolean;
+  /** Timestamp (ms, performance clock) of the last poll. */
+  timestamp: number;
+}
+
+/** One-shot actions decoded from button edges. */
+export type GamepadAction =
+  | { type: 'confirmLift' }            // A — A_ready confirmation / start LIFT (→ TRANSPORT when lifted)
+  | { type: 'emergencyHold' }          // B
+  | { type: 'cycleController'; controller: ControllerKind } // X
+  | { type: 'cycleCamera'; camera: CameraMode }             // Y
+  | { type: 'focus'; focus: GamepadFocus }                  // LB / RB
+  | { type: 'power'; powerLimit: number }                   // D-pad up/down
+  | { type: 'scenario'; scenario: ScenarioId }              // D-pad left/right
+  | { type: 'pause'; paused: boolean }                      // START
+  | { type: 'reset' };                                      // BACK
+
+/** Continuous command decoded every poll. Frame: body (agent focus) or world (swarm focus). */
+export interface GamepadCommand {
+  focus: GamepadFocus;
+  /** Agent focus: body twist. Swarm focus: v_c (world) and ω_c. Already scaled by powerLimit. */
+  vx: number;
+  vy: number;
+  omega: number;
+  /** Lift rate command (m/s, + up) from RT − LT. */
+  lift: number;
+  /** Camera tilt rate from RS-y, [−1, 1]. */
+  cameraTilt: number;
+  actions: GamepadAction[];
+}
+
+// ───────────────────────── fleet: sub-swarms / teams ─────────────────────────
+
+/** Team-level phase layered over the per-agent FSM (OperationMode stays the formula-1 chain). */
+export type TeamPhase =
+  | 'FORMING'         // agents approaching / contacting
+  | 'LIFTING'
+  | 'CARRYING'        // TRANSPORT under virtual-platform command
+  | 'DOCKING_ALIGN'   // two teams converge heights (consensus) and coarse pose
+  | 'PRECISION_MATE'  // sub-millimetre final approach: |Δh| < 1 mm, |Δθ| < 0.2°
+  | 'MATED'
+  | 'CHARGING_DOCK'   // load frozen while a low-battery member is hot-swapped with a reserve
+  | 'LOWERING'
+  | 'DONE'
+  | 'HOLD';
+
+/** What an individual robot is doing for the fleet. */
+export type AgentDuty = 'ACTIVE' | 'RESERVE' | 'TO_CHARGER' | 'CHARGING' | 'SWAP_IN' | 'IDLE';
+
+export type TeamRole = 'carrier' | 'docker' | 'escort' | 'scout';
+
+/** Dispatch of a sub-swarm (team) onto a payload (CLAUDE.md v2 §4.1). */
+export interface SubSwarmAssignment {
+  teamId: string;
+  role: TeamRole;
+  task: string;
+  agentIds: number[];
+  /** r_i per agent (payload frame). Must contain every agentId. */
+  supports: SupportAssignment[];
+  /** Payload reference pose at dispatch. */
+  payloadPose: Pose2D;
+  payloadId?: string;
+  /** Payload centre of mass (payload frame) and mass — used for the hot-swap polygon check. */
+  com?: Vec2;
+  mass?: number;
+  controller?: ControllerKind;
+  targetHeight?: number;
+  network?: Partial<NetworkParams>;
+}
+
+/** Two-team cooperative docking (factory: DOCKING_ALIGN → PRECISION_MATE). */
+export interface DockingSpec {
+  /** Team that holds still (reference). */
+  baseTeam: string;
+  /** Team that moves its payload onto the mating pose. */
+  moverTeam: string;
+  /** Desired mover payload pose expressed in the base payload frame. */
+  matePose: Pose2D;
+  /** Height offset h*_mover − h*_base required for mating (m), default 0. */
+  heightOffset?: number;
+  /** Tolerances (defaults: 1 mm, 0.2°, 1 mm). */
+  tolHeight?: number;
+  tolTheta?: number;
+  tolPos?: number;
+}
+
+export interface ChargingStation { id: string; pos: Vec2; occupiedBy: number | null }
+
+export interface FleetWorldState {
+  time: number;
+  contacts: SupportContactOutput[];
+  /** Payload states by payloadId (from src/physics). */
+  payloads?: Record<string, PayloadState>;
+  faults?: FaultInjection;
+}
+
+export interface TeamTelemetry {
+  teamId: string;
+  role: TeamRole;
+  phase: TeamPhase;
+  epoch: number;
+  agentIds: number[];
+  controller: ControllerKind;
+  targetHeight: number;
+  meanHeight: number;
+  heightSpread: number;
+  payloadRef: Pose2D;
+  groupReady: boolean;
+  holdReasons: { agentId: number; reason: string }[];
+  activeEdges: [number, number][];
+}
+
+export interface DockingTelemetry {
+  baseTeam: string;
+  moverTeam: string;
+  phase: TeamPhase;
+  /** |h̄_mover − h̄_base − heightOffset| (m). */
+  heightError: number;
+  /** Planar pose error of the mover payload vs the mating pose (m, rad). */
+  posError: number;
+  thetaError: number;
+}
+
+export interface FleetEvent { t: number; kind: 'hot-swap-start' | 'hot-swap-done' | 'hot-swap-blocked' | 'charged' | 'docked' | 'phase'; teamId?: string; agentId?: number; detail: string }
+
+export interface FleetStepOutput {
+  time: number;
+  teams: TeamTelemetry[];
+  docking: DockingTelemetry[];
+  duties: Record<number, AgentDuty>;
+  states: AgentState[];
+  chargers: ChargingStation[];
+  events: FleetEvent[];
 }

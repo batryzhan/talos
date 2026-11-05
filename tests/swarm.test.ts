@@ -5,7 +5,7 @@ import { NeighborTable, RadioNetwork } from '../src/swarm/network';
 import { Rng } from '../src/swarm/rng';
 import { SwarmManager } from '../src/swarm/SwarmManager';
 import { liftControl } from '../src/swarm/controllers';
-import { DEFAULT_LIFT_PARAMS } from '../src/robot/liftDrive';
+import { DEFAULT_LIFT_PARAMS, tractionForce } from '../src/robot/liftDrive';
 import { AgentFsm, canTransition } from '../src/swarm/fsm';
 
 const msg = (o: Partial<AgentMessage> = {}): AgentMessage => ({
@@ -51,7 +51,7 @@ describe('controllers A/B/C (formula 17)', () => {
   it('C couples to neighbours and saturates to the most loaded participant', () => {
     const c = liftControl({ ...base, kind: 'C', neighbors: [{ h: 0.0, force: null }] });
     expect(c.raw).toBeCloseTo(1.5 * 0.05 - 0.05, 12);
-    const loaded = liftControl({ ...base, kind: 'C', h: 0, neighbors: [{ h: 0, force: 200 }] });
+    const loaded = liftControl({ ...base, kind: 'C', h: 0, neighbors: [{ h: 0, force: 0.8 * tractionForce(DEFAULT_LIFT_PARAMS) }] });
     const free = liftControl({ ...base, kind: 'C', h: 0, neighbors: [{ h: 0, force: null }] });
     expect(loaded.vUp).toBeLessThan(free.vUp);
     expect(loaded.u).toBeLessThanOrEqual(loaded.vUp);

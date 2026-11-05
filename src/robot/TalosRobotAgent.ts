@@ -1,5 +1,10 @@
 /**
- * TalosRobotAgent — one goBILDA Strafer with a Viper Slide lift.
+ * TalosRobotAgent — one Industrial TALOS: goBILDA Strafer chassis + four-corner gantry lift.
+ *
+ * Visual model (v3, straferSpec.ts): CAD Strafer frame (432 × 360 mm, goBILDA 1120 U-channel) lifted to
+ * 46 mm clearance, procedural goBILDA 140 mm mecanum wheels (16 yellow PU rollers at 45°, steel side
+ * plates), TalosChassis dressing (TALOS nameplates, REV Control Hub, battery + red kill switch,
+ * wiring) and the four-post gantry (corner-node columns, cable drive, 432 × 360 plate, 4 load cells).
  *
  * Owns: .glb rig (wheels + rollers), Mecanum kinematics (formula 14 with uniform saturation),
  * Viper Slide drive (formula 15) with HOLD position lock, local sensors (height, drive current,
@@ -19,19 +24,34 @@ import type {
 import { WHEEL_ORDER } from '../contracts/types';
 import { forwardKinematics, saturateUniform, slewUniform, twistToWheelRates, MECANUM_SIGNS } from './mecanum';
 import { DEFAULT_LIFT_PARAMS, createLiftState, stepLift, type LiftState } from './liftDrive';
-import { PAD_BASE_Z, PAD_HALF_SIZE, ViperSlideRig } from './ViperSlideRig';
+import { PAD_BASE_Z, PAD_HALF_EXTENTS, PAD_HALF_SIZE, ViperSlideRig } from './ViperSlideRig';
+import { TalosChassis, dressStraferModel } from './TalosChassis';
+import { buildMecanumWheels } from './MecanumWheel';
+import { CHASSIS_LIFT, DRIVE_OMEGA_FREE, MECANUM_140, ROBOT_FOOTPRINT } from './straferSpec';
 
-/** Strafer geometry measured from the CAD (public/robot.glb). */
+/**
+ * Strafer kinematics with 140 mm wheels: a, b = CAD axle half-spacings, ω_max = 5203 26.9:1 free
+ * speed (223 rpm = 23.35 rad/s → 1.63 m/s at the rim).
+ */
 export const STRAFER_GEOMETRY: MecanumGeometry = {
-  r: 0.048058,
-  a: 0.168,
-  b: 0.208,
-  omegaMax: 1.8 / 0.048058, // 1.8 m/s at the rim
-  alphaMax: 7.0 / 0.048058, // 7 m/s² rim slew (traction limit)
+  r: MECANUM_140.r,
+  a: MECANUM_140.x,
+  b: MECANUM_140.y,
+  omegaMax: DRIVE_OMEGA_FREE,
+  alphaMax: 7.0 / MECANUM_140.r, // 7 m/s² rim slew (traction limit, μ ≈ 0.7)
 };
 
-/** Chassis footprint half extents (m). */
-export const STRAFER_FOOTPRINT = { halfX: 0.216, halfY: 0.2266 };
+/** Robot footprint half extents incl. the wheel overhang (m). */
+export const STRAFER_FOOTPRINT = { halfX: ROBOT_FOOTPRINT.halfX, halfY: ROBOT_FOOTPRINT.halfY };
+
+/** Corner load-cell order on the cargo plate. */
+export const LOAD_CELL_CORNERS = ['FL', 'FR', 'RL', 'RR'] as const;
+export type LoadCellCorner = (typeof LOAD_CELL_CORNERS)[number];
+export interface LoadCellReading {
+  corner: LoadCellCorner;
+  /** Corner force (N), or null when the cell is absent / uncalibrated / not in contact data. */
+  force: number | null;
+}
 
 export const MODE_COLORS: Record<OperationMode, number> = {
   READY: 0x3fb950,
@@ -71,7 +91,7 @@ interface WheelRig {
   rollers: { node: THREE.Object3D; axis: THREE.Vector3; phi0: number; angle: number }[];
 }
 
-const ROLLER_RADIUS = 0.009;
+const ROLLER_RADIUS = MECANUM_140.roller.rMax;
 
 /** Load the Strafer .glb once; pass `gltf.scene` as `model` to each agent. */
 export function loadStraferModel(url = '/robot.glb', onProgress?: (loaded: number, total: number) => void): Promise<THREE.Group> {
@@ -88,6 +108,8 @@ export class TalosRobotAgent {
   /** Pose root: footprint centre on the floor. Add to the scene. */
   readonly root = new THREE.Group();
   readonly slide: ViperSlideRig | null = null;
+  readonly chassis: TalosChassis | null = null;
+  private lastVisualTime = 0;
   readonly geometry: MecanumGeometry;
   readonly liftParams: LiftDriveParams;
   readonly forceSensor: ForceSensorStatus;
@@ -132,12 +154,26 @@ export class TalosRobotAgent {
     this.lift = createLiftState(this.liftParams.hMin);
     this.stiffness = opts.stiffness ?? 2.0e5;
     this.damping = opts.damping ?? 2.0e3;
-    this.fAllow = opts.fAllow ?? 180;
+    this.fAllow = opts.fAllow ?? 400;
 
     if (opts.model) {
       const model = opts.model.clone(true);
+      dressStraferModel(model);
+      // The STEP export carries 96 mm wheels: drop them, mount 140 mm wheels on the same axles and
+      // raise the frame by Δr (frame bottom 24 → 46 mm).
+      const cadWheels: THREE.Object3D[] = [];
+      model.traverse(n => { if (n.name.startsWith('wheel_')) cadWheels.push(n); });
+      cadWheels.forEach(n => n.removeFromParent());
+      model.position.z += CHASSIS_LIFT;
       this.root.add(model);
-      this.rigWheels(model);
+      const wheels = new THREE.Group();
+      wheels.name = 'mecanum_140';
+      wheels.add(...buildMecanumWheels());
+      this.root.add(wheels);
+      this.rigWheels(wheels);
+      this.chassis = new TalosChassis();
+      this.root.add(this.chassis.root);
+      this.chassis.setStatusColor(MODE_COLORS[this.mode]);
       this.slide = new ViperSlideRig();
       this.root.add(this.slide.root);
       this.slide.setStatusColor(MODE_COLORS[this.mode]);
@@ -197,6 +233,7 @@ export class TalosRobotAgent {
     if (mode === 'HOLD') this.hold();
     if (mode === 'LIFT') this.wheelTarget = [0, 0, 0, 0]; // chassis locked during pure lift
     this.slide?.setStatusColor(MODE_COLORS[mode]);
+    this.chassis?.setStatusColor(MODE_COLORS[mode]);
   }
 
   /** Safe hold: zero chassis, engage lift position lock at the current height. */
@@ -221,6 +258,7 @@ export class TalosRobotAgent {
     this.contact = null;
     this.mode = 'READY';
     this.slide?.setStatusColor(MODE_COLORS.READY);
+    this.chassis?.setStatusColor(MODE_COLORS.READY);
     this.slide?.setContact(null);
   }
 
@@ -285,6 +323,7 @@ export class TalosRobotAgent {
       padZ: PAD_BASE_Z + this.lift.h,
       padVel: this.lift.hDot,
       padHalfSize: PAD_HALF_SIZE,
+      padHalfExtents: { ...PAD_HALF_EXTENTS },
       stiffness: this.stiffness,
       damping: this.damping,
       fAllow: this.fAllow,
@@ -298,10 +337,22 @@ export class TalosRobotAgent {
     return this.contact ? this.contact.delta > 0 : null;
   }
 
-  /** Force sensor reading (N) or null ("NA") when absent or uncalibrated — never 0 for "no sensor". */
+  /**
+   * Four corner load cells. null ("NA") when absent, uncalibrated or before the physics reports a
+   * contact — never 0 for "no reading". The contact model applies F_i at the plate centre, so by
+   * symmetry each of the four cells carries F_i / 4.
+   */
+  loadCells(): LoadCellReading[] {
+    const ok = this.forceSensor === 'calibrated' && this.contact !== null;
+    const f = ok ? Math.max(0, this.contact!.force) / 4 : null;
+    return LOAD_CELL_CORNERS.map(corner => ({ corner, force: f }));
+  }
+
+  /** Force sensor reading F_i = Σ load cells (N), or null ("NA") — never 0 for "no sensor". */
   measuredForce(): number | null {
-    if (this.forceSensor !== 'calibrated' || !this.contact) return null;
-    return Math.max(0, this.contact.force);
+    const cells = this.loadCells();
+    if (cells.some(c => c.force === null)) return null;
+    return cells.reduce((s, c) => s + (c.force as number), 0);
   }
 
   get health(): HealthFlag {
@@ -356,11 +407,17 @@ export class TalosRobotAgent {
       w.node.rotation.set(0, w.angle, 0);
       for (const r of w.rollers) r.node.quaternion.setFromAxisAngle(r.axis, r.angle);
     }
-    this.slide?.setHeight(this.lift.h);
+    if (this.slide) {
+      this.slide.setHeight(this.lift.h);
+      this.slide.setLoad(this.contact && this.contact.delta > 0 ? this.contact.force : 0);
+      this.slide.animate(this.localTime - this.lastVisualTime); // sim-time spring (deterministic)
+    }
+    this.lastVisualTime = this.localTime;
   }
 
   dispose(): void {
     this.slide?.dispose();
+    this.chassis?.dispose();
     this.root.removeFromParent();
   }
 }

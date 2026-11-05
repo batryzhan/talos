@@ -14,7 +14,7 @@
  *  - Controllers A / B / C (formula 17), FSM with HOLD (§4.6), virtual platform (formula 16).
  */
 import type {
-  AgentCommand, AgentMessage, ControllerKind, NetworkParams, PayloadMotionCommand, Pose2D, SafetyLimits,
+  AgentCommand, AgentMessage, ControllerKind, OperationMode, NetworkParams, PayloadMotionCommand, Pose2D, SafetyLimits,
   SupportAssignment, SupportContactInput, SwarmConfig, SwarmStepOutput, Vec2, WheelRates, WorldState,
 } from '../contracts/types';
 import { CONTROL_HZ, RADIO_HZ } from '../contracts/types';
@@ -65,13 +65,20 @@ const ZERO: WheelRates = [0, 0, 0, 0];
 function predictHeight(msg: AgentMessage, now: number): number {
   return msg.height + msg.heightVel * Math.max(0, now - msg.time);
 }
+/** Modes in which an agent bears (or is about to bear) the payload. */
+const LOAD_MODES: ReadonlySet<OperationMode> = new Set<OperationMode>(['LIFT', 'TRANSPORT', 'LOWER', 'HOLD']);
 const DT_CTRL = 1 / CONTROL_HZ;
 const DT_RADIO = 1 / RADIO_HZ;
 
 export class SwarmManager {
   readonly config: SwarmConfig;
   private members: Member[] = [];
+  private byId = new Map<number, Member>();
   private network!: RadioNetwork;
+  /** Manager time of the last membership (epoch) change — neighbour-silence grace starts here. */
+  private epochStartT = 0;
+  /** Load frozen (hot-swap / operator pause): loaded members lock lift + zero wheels. */
+  private frozen = false;
   private rng: Rng;
   private epoch = 0;
   private t = 0;
@@ -107,36 +114,85 @@ export class SwarmManager {
 
   // ───────────────────────── membership ─────────────────────────
 
-  /** Replace the group. Ids must be exactly 1..N. Increments the epoch (formula 1 membership). */
+  /**
+   * Set the group membership (any unique agent ids; ring order = ascending id). Increments the epoch
+   * (formula 1 / НИР §1.16). Members that stay keep their FSM, support point and progress; their
+   * neighbour tables are reset (old-epoch packets must not be used) and the silence watchdog gets
+   * a grace period of `neighborTimeout`. New members start from their current agent mode.
+   */
   setAgents(agents: TalosRobotAgent[]): void {
     const sorted = [...agents].sort((a, b) => a.id - b.id);
-    sorted.forEach((a, i) => { if (a.id !== i + 1) throw new Error(`SwarmManager: agent ids must be 1..N, got ${a.id} at position ${i + 1}`); });
+    for (let i = 1; i < sorted.length; i++) if (sorted[i].id === sorted[i - 1].id) throw new Error(`SwarmManager: duplicate agent id ${sorted[i].id}`);
     this.epoch++;
-    this.network = new RadioNetwork(sorted.length, this.config.network, this.rng.fork());
+    this.epochStartT = this.t;
+    this.network = new RadioNetwork(sorted.map(a => a.id), this.config.network, this.rng.fork());
+    const old = this.byId;
     this.members = sorted.map(agent => {
       const lp = agent.liftParams;
+      const table = new NeighborTable(agent.id, { hMin: lp.hMin, hMax: lp.hMax, maxAge: this.config.network.maxAge });
+      const prev = old.get(agent.id);
+      if (prev && prev.agent === agent) return { ...prev, table, epoch: this.epoch };
+      const fsm = new AgentFsm();
+      fsm.mode = agent.mode;
       return {
-        agent,
-        fsm: new AgentFsm(),
-        table: new NeighborTable(agent.id, { hMin: lp.hMin, hMax: lp.hMax, maxAge: this.config.network.maxAge }),
+        agent, fsm, table,
         epoch: this.epoch,
         r: null, headingOffset: 0, arrived: false, contactConfirmed: false, liftDone: false,
-        cmd: { agentId: agent.id, mode: 'READY', wheelRates: [...ZERO], liftVelocity: 0, liftLock: false },
+        cmd: { agentId: agent.id, mode: agent.mode, wheelRates: [...ZERO], liftVelocity: 0, liftLock: false },
       };
     });
-    for (const m of this.members) { m.fsm.mode = m.agent.mode; }
+    this.byId = new Map(this.members.map(m => [m.agent.id, m]));
   }
+
+  /** Add one agent (epoch++), optionally with its support point r_i. */
+  addAgent(agent: TalosRobotAgent, r?: Vec2, headingOffset = 0): void {
+    this.setAgents([...this.agents.filter(a => a.id !== agent.id), agent]);
+    if (r) { const m = this.member(agent.id); m.r = { ...r }; m.headingOffset = headingOffset; m.arrived = false; }
+  }
+
+  /** Remove one agent from the group (epoch++). The caller takes over its control. Returns its r_i. */
+  removeAgent(id: number): Vec2 | null {
+    const m = this.byId.get(id);
+    if (!m) return null;
+    this.setAgents(this.agents.filter(a => a.id !== id));
+    return m.r ? { ...m.r } : null;
+  }
+
+  /** READY → APPROACH for one (e.g. newly joined) agent. */
+  beginApproachFor(id: number): boolean {
+    const m = this.member(id);
+    if (!m.r || !m.fsm.go('APPROACH', this.t, 'join formation')) return false;
+    m.agent.setMode('APPROACH');
+    return true;
+  }
+
+  /**
+   * Freeze the load: members carrying it (TRANSPORT, or LIFT already at h*) engage the lift position
+   * lock and zero their wheels; the reference trajectory stops. Members still joining keep working.
+   */
+  setFrozen(frozen: boolean): void {
+    this.frozen = frozen;
+    if (frozen) this.transportCmd = { vc: { x: 0, y: 0 }, omegaC: 0 };
+  }
+
+  get isFrozen(): boolean { return this.frozen; }
+  get ids(): number[] { return this.members.map(m => m.agent.id); }
+  get targetHeight(): number { return this.config.targetHeight; }
+  get isLiftRequested(): boolean { return this.liftRequested; }
+  get isTransportRequested(): boolean { return this.transportRequested; }
+  supportOf(id: number): Vec2 | null { const r = this.byId.get(id)?.r; return r ? { ...r } : null; }
+  has(id: number): boolean { return this.byId.has(id); }
 
   get agents(): TalosRobotAgent[] { return this.members.map(m => m.agent); }
   get currentEpoch(): number { return this.epoch; }
   get time(): number { return this.t; }
-  get edges(): [number, number][] { return this.network.edges.map(([a, b]) => [a + 1, b + 1]); }
+  get edges(): [number, number][] { return this.network.idEdges(); }
   modeOf(id: number) { return this.member(id).fsm.mode; }
   fsmHistory(id: number) { return this.member(id).fsm.history; }
   rejectedPackets(id: number) { return { ...this.member(id).table.rejected }; }
 
   private member(id: number): Member {
-    const m = this.members[id - 1];
+    const m = this.byId.get(id);
     if (!m) throw new Error(`SwarmManager: no agent ${id}`);
     return m;
   }
@@ -294,7 +350,8 @@ export class SwarmManager {
 
     // 3. phase logic
     const ready = this.isGroupReady(world);
-    const allAtHeight = this.members.every(m => m.liftDone);
+    // members already in TRANSPORT count as "at height" (h* may have been retuned since they lifted)
+    const allAtHeight = this.members.every(m => m.liftDone || m.fsm.mode === 'TRANSPORT');
     for (const m of this.members) this.phase(m, world, ready, allAtHeight);
 
     // 4. group-uniform wheel saturation during TRANSPORT (keeps the rigid-body shape)
@@ -302,7 +359,7 @@ export class SwarmManager {
 
     // 5. integrate reference trajectory + metrics
     const transporting = this.members.some(m => m.fsm.mode === 'TRANSPORT');
-    if (transporting) {
+    if (transporting && !this.frozen) {
       integratePayloadRef(this.payloadRef, this.transportCmd, DT_CTRL);
       if (world.payload) {
         const e = { x: world.payload.pose.x - this.payloadRef.x, y: world.payload.pose.y - this.payloadRef.y };
@@ -347,15 +404,20 @@ export class SwarmManager {
     if ((mode === 'LIFT' || mode === 'TRANSPORT') && m.contactConfirmed && world.payload && a.contact && a.contact.delta <= 0) return 'support contact lost (δ ≤ 0)';
     if ((mode === 'LIFT' || mode === 'TRANSPORT') && world.payload?.rho !== undefined && world.payload.rho < 0) return 'r_c outside support polygon (ρ < 0)';
     if (loaded && kind === 'B') {
-      const hs = this.members.map(x => x.agent.lift.h);
-      if (Math.max(...hs) - Math.min(...hs) > s.maxHeightSkew) return 'height skew over limit (global)';
+      const hs = this.members.filter(x => LOAD_MODES.has(x.fsm.mode)).map(x => x.agent.lift.h);
+      if (hs.length && Math.max(...hs) - Math.min(...hs) > s.maxHeightSkew) return 'height skew over limit (global)';
     }
     if (loaded && kind === 'C') {
       const now = a.localTime;
+      const grace = this.t - this.epochStartT < s.neighborTimeout; // fresh epoch: tables are refilling
       for (const j of this.network.neighborsOf(a.id)) {
         const e = m.table.entries.get(j);
-        if (!e || now - e.msg.time > s.neighborTimeout) return `neighbour ${j} silent > ${s.neighborTimeout}s`;
-        if (Math.abs(predictHeight(e.msg, now) - a.lift.h) > s.maxHeightSkew) return `height skew to neighbour ${j} over limit`;
+        if (!e || now - e.msg.time > s.neighborTimeout) {
+          if (grace) continue;
+          return `neighbour ${j} silent > ${s.neighborTimeout}s`;
+        }
+        // skew only among load-bearing members (a joining robot below the load is not a skew fault)
+        if (LOAD_MODES.has(e.msg.mode) && Math.abs(predictHeight(e.msg, now) - a.lift.h) > s.maxHeightSkew) return `height skew to neighbour ${j} over limit`;
       }
     }
     return null;
@@ -364,11 +426,15 @@ export class SwarmManager {
   private neighborHeights(m: Member): NeighborHeight[] {
     const kind = this.config.controller;
     if (kind === 'A') return [];
+    // formula 17 couples only load-bearing neighbours (LIFT/TRANSPORT/LOWER/HOLD): a member that is
+    // still approaching or seeking contact must not drag the carriers toward its height
     if (kind === 'B') {
-      return this.members.filter(x => x !== m).map(x => ({ h: x.agent.lift.h, force: x.agent.measuredForce() }));
+      return this.members.filter(x => x !== m && LOAD_MODES.has(x.fsm.mode)).map(x => ({ h: x.agent.lift.h, force: x.agent.measuredForce() }));
     }
     const now = m.agent.localTime;
-    return m.table.fresh(now, this.config.safety.neighborTimeout).map(e => ({ h: predictHeight(e.msg, now), force: e.msg.force }));
+    return m.table.fresh(now, this.config.safety.neighborTimeout)
+      .filter(e => LOAD_MODES.has(e.msg.mode))
+      .map(e => ({ h: predictHeight(e.msg, now), force: e.msg.force }));
   }
 
   private ownLoad(m: Member): number {
@@ -418,8 +484,14 @@ export class SwarmManager {
       }
 
       case 'CONTACT': {
-        if (!world.payload) {
-          m.contactConfirmed = true; // no physical payload in the scene: nothing to touch
+        const loadHeld = this.members.some(x => x !== m && LOAD_MODES.has(x.fsm.mode) && (x.liftDone || x.fsm.mode === 'TRANSPORT'));
+        if (!world.payload && loadHeld && a.lift.h < this.config.targetHeight - 0.003) {
+          // joining under a load that is already up (hot-swap) with no physics engine: the load
+          // underside is at the carriers' height — raise the pad there before reporting contact
+          m.contactConfirmed = false;
+          cmd.liftVelocity = Math.min(a.liftParams.vMax, this.config.gains.kp * (this.config.targetHeight - a.lift.h) + 0.01);
+        } else if (!world.payload) {
+          m.contactConfirmed = true; // no physical payload in the scene: nothing (more) to touch
         } else if (a.contact && a.contact.delta > 0) {
           m.contactConfirmed = true;
         } else if (a.lift.h >= a.liftParams.hMax - 1e-4) {
@@ -435,13 +507,19 @@ export class SwarmManager {
 
       case 'LIFT': {
         const h0 = this.config.targetHeight;
+        if (allAtHeight && this.transportRequested && m.fsm.go('TRANSPORT', this.t, 'at h*')) {
+          a.setMode('TRANSPORT');
+          if (this.frozen) cmd.liftLock = true;
+          break;
+        }
+        if (this.frozen && m.liftDone) { cmd.liftLock = true; break; } // carrier holding a frozen load
         cmd.liftVelocity = this.liftLaw(m, h0);
         m.liftDone = Math.abs(a.lift.h - h0) < 0.002 && Math.abs(a.lift.hDot) < 0.002;
-        if (allAtHeight && this.transportRequested && m.fsm.go('TRANSPORT', this.t, 'at h*')) a.setMode('TRANSPORT');
         break;
       }
 
       case 'TRANSPORT': {
+        if (this.frozen) { cmd.liftLock = true; break; } // position lock + zero wheels while frozen
         cmd.liftVelocity = this.liftLaw(m, this.config.targetHeight);
         if (m.r) {
           const tw = supportTwist(this.transportCmd, this.payloadRef, m.r, a.pose, m.headingOffset, this.track);
