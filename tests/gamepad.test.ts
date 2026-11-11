@@ -62,7 +62,53 @@ describe('XboxController', () => {
     expect(t.pressed).toEqual(expect.arrayContaining(['RT']));
   });
 
-  it('button edges fire exactly once; X/Y/D-pad/START cycle state', () => {
+  it('Y is button[3] and toggles Solo chassis ⇄ Macro-entity, returning to the last robot', () => {
+    expect(XBOX_BUTTON_INDEX.Y).toBe(3);
+    const p = fakePad(), { c } = controller(p);
+    const y = () => { p.press('Y'); const a = c.poll().actions; p.release('Y'); c.poll(); return a; };
+    p.press('RB'); c.poll(); p.release('RB'); c.poll(); // solo focus on robot #2
+    expect(y()).toEqual([{ type: 'toggleControl', control: 'macro', focus: { kind: 'swarm', teamId: 'alpha' } }]);
+    expect(c.getSnapshot().focus).toEqual({ kind: 'swarm', teamId: 'alpha' });
+    expect(c.getSnapshot().camera).toBe('orbit'); // Y no longer touches the camera
+    expect(y()).toEqual([{ type: 'toggleControl', control: 'solo', focus: { kind: 'agent', agentId: 2 } }]);
+    // held Y does not repeat
+    p.press('Y'); c.poll();
+    expect(c.poll().actions).toEqual([]);
+  });
+
+  it('Y does nothing when there is no macro-entity (or no solo robot) to switch to', () => {
+    const p = fakePad(), solo = controller(p, { teamIds: [] }).c;
+    p.press('Y');
+    expect(solo.poll().actions).toEqual([]);
+    expect(solo.getSnapshot().focus).toEqual({ kind: 'agent', agentId: 1 });
+
+    const q = fakePad(), macro = controller(q, { agentIds: [], teamIds: ['alpha'] }).c;
+    q.press('Y');
+    expect(macro.poll().actions).toEqual([]);
+    expect(macro.getSnapshot().focus).toEqual({ kind: 'swarm', teamId: 'alpha' });
+  });
+
+  it('macro focus drives the team in the world frame at the swarm limits', () => {
+    const p = fakePad(), { c } = controller(p);
+    p.press('Y'); c.poll(); p.release('Y');
+    p.pad.axes = [0, -1, -1, 0]; // LS up, RS left
+    const cmd = c.poll();
+    expect(cmd.focus.kind).toBe('swarm');
+    expect(cmd.vx).toBeCloseTo(c.opts.swarmMaxSpeed, 12);
+    expect(cmd.omega).toBeCloseTo(c.opts.swarmMaxTurn, 12);
+  });
+
+  it('R3 (right-stick click, button[11]) cycles the camera', () => {
+    expect(XBOX_BUTTON_INDEX.RS).toBe(11);
+    const p = fakePad(), { c } = controller(p);
+    const r3 = () => { p.press('RS'); const a = c.poll().actions; p.release('RS'); c.poll(); return a; };
+    expect(r3()).toEqual([{ type: 'cycleCamera', camera: 'follow' }]);
+    expect(r3()).toEqual([{ type: 'cycleCamera', camera: 'centroid' }]);
+    expect(c.getSnapshot().camera).toBe('centroid');
+    expect(c.getSnapshot().focus).toEqual({ kind: 'agent', agentId: 1 }); // R3 does not touch the focus
+  });
+
+  it('button edges fire exactly once; X/R3/D-pad/START cycle state', () => {
     const p = fakePad(), { c } = controller(p);
     p.press('X');
     expect(c.poll().actions).toEqual([{ type: 'cycleController', controller: 'A' }]);
@@ -70,7 +116,7 @@ describe('XboxController', () => {
     p.release('X'); c.poll(); p.press('X');
     expect(c.poll().actions[0]).toEqual({ type: 'cycleController', controller: 'B' });
     p.release('X');
-    p.press('Y'); expect(c.poll().actions[0]).toEqual({ type: 'cycleCamera', camera: 'follow' }); p.release('Y');
+    p.press('RS'); expect(c.poll().actions[0]).toEqual({ type: 'cycleCamera', camera: 'follow' }); p.release('RS');
     p.press('DPAD_DOWN'); c.poll(); p.release('DPAD_DOWN'); c.poll(); p.press('DPAD_DOWN'); c.poll(); p.release('DPAD_DOWN');
     expect(c.getSnapshot().powerLimit).toBe(0.5);
     p.press('DPAD_RIGHT'); expect(c.poll().actions[0]).toEqual({ type: 'scenario', scenario: 'factory' }); p.release('DPAD_RIGHT');

@@ -364,7 +364,8 @@ export type GamepadAction =
   | { type: 'confirmLift' }            // A — A_ready confirmation / start LIFT (→ TRANSPORT when lifted)
   | { type: 'emergencyHold' }          // B
   | { type: 'cycleController'; controller: ControllerKind } // X
-  | { type: 'cycleCamera'; camera: CameraMode }             // Y
+  | { type: 'toggleControl'; control: 'solo' | 'macro'; focus: GamepadFocus } // Y — Solo chassis ⇄ Macro-entity
+  | { type: 'cycleCamera'; camera: CameraMode }             // R3 (right-stick click)
   | { type: 'focus'; focus: GamepadFocus }                  // LB / RB
   | { type: 'power'; powerLimit: number }                   // D-pad up/down
   | { type: 'scenario'; scenario: ScenarioId }              // D-pad left/right

@@ -4,7 +4,8 @@
  *  - polling via navigator.getGamepads() (injectable for tests), W3C "standard" mapping
  *  - radial deadzone 0.12 on sticks, scalar deadzone on triggers, smooth response curve
  *    out = (1 − k)·n + k·n³  (n = magnitude rescaled past the deadzone → continuous at the edge)
- *  - edge-detected button actions (A lift, B emergency HOLD, X controller A/B/C, Y camera,
+ *  - edge-detected button actions (A lift, B emergency HOLD, X controller A/B/C,
+ *    Y toggle Solo chassis ⇄ unified Macro-entity, R3 (right-stick click) camera,
  *    LB/RB focus robot #1..#N / swarm team, D-pad power & scenario, START pause, BACK reset)
  *  - dual-rumble feedback for contact (δ_i > 0) and HOLD
  *  - observable snapshot (GamepadTelemetry) for React via subscribe / getSnapshot
@@ -94,6 +95,9 @@ export class XboxController {
   private pollUsers = 0;
   private cameraYaw = 0;
   private lastCommand: GamepadCommand;
+  /** Last solo robot / macro team the Y toggle left, so toggling back returns to it. */
+  private lastSoloId: number | null = null;
+  private lastTeamId: string | null = null;
 
   constructor(options: XboxControllerOptions = {}) {
     this.opts = {
@@ -164,6 +168,22 @@ export class XboxController {
     return list[(Math.max(0, i) + step + list.length) % list.length];
   }
 
+  /**
+   * Y button: switch between driving one chassis (solo) and the unified macro-entity (team).
+   * Returns the new focus, or null when the roster has nothing of the other kind.
+   */
+  private toggleControlFocus(): GamepadFocus | null {
+    const f = this.snapshot.focus;
+    if (f.kind === 'agent') {
+      this.lastSoloId = f.agentId;
+      const teamId = this.lastTeamId !== null && this.teamIds.includes(this.lastTeamId) ? this.lastTeamId : this.teamIds[0];
+      return teamId === undefined ? null : { kind: 'swarm', teamId };
+    }
+    this.lastTeamId = f.teamId;
+    const agentId = this.lastSoloId !== null && this.agentIds.includes(this.lastSoloId) ? this.lastSoloId : this.agentIds[0];
+    return agentId === undefined ? null : { kind: 'agent', agentId };
+  }
+
   /** Read the pad once: update telemetry, decode button edges into actions, return the command. */
   poll(): GamepadCommand {
     const pad = this.pickPad();
@@ -208,6 +228,13 @@ export class XboxController {
       next.controller = controller; actions.push({ type: 'cycleController', controller });
     }
     if (edge('Y')) {
+      const focus = this.toggleControlFocus();
+      if (focus) {
+        next.focus = focus;
+        actions.push({ type: 'toggleControl', control: focus.kind === 'agent' ? 'solo' : 'macro', focus });
+      }
+    }
+    if (edge('RS')) {
       const camera = CAMERA_CYCLE[(CAMERA_CYCLE.indexOf(s.camera) + 1) % CAMERA_CYCLE.length];
       next.camera = camera; actions.push({ type: 'cycleCamera', camera });
     }
