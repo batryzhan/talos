@@ -111,6 +111,8 @@ export class MetamorphicScene implements PacketSink {
   /** Latch load ratios, [0, 1]; also the instanced `aStress` attribute. */
   readonly stress = new Float32Array(MAX_LATCHES);
   readonly events: string[] = [];
+  /** Optional journal sink: receives every logged line (without the time prefix). */
+  onLog: ((line: string) => void) | null = null;
   dag: MissionDag | null = null;
   bridge: BridgeDeployment | null = null;
   route: S1Route = { status: 'UNREACHABLE', cost: Infinity };
@@ -615,6 +617,7 @@ export class MetamorphicScene implements PacketSink {
   private log(line: string): void {
     this.events.push(`${this.clock.time.toFixed(1)} ${line}`);
     if (this.events.length > 8) this.events.shift();
+    this.onLog?.(line);
   }
 
   private resetPoses(): void {

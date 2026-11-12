@@ -1,0 +1,27 @@
+@import '@fontsource-variable/inter';
+@import '@fontsource/jetbrains-mono/400.css';
+@import '@fontsource/jetbrains-mono/500.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * { @apply border-border; }
+  html { color-scheme: light; }
+  html.dark { color-scheme: dark; }
+  html, body, #root { height: 100%; }
+  body {
+    @apply bg-background text-sm text-foreground antialiased;
+    font-feature-settings: 'cv11', 'ss01';
+    overflow: hidden;
+  }
+  ::selection { @apply bg-primary/30; }
+}
+
+@layer utilities {
+  /** Telemetry numbers: monospace digits that line up in columns. */
+  .num { @apply font-mono tabular-nums; }
+  /** 11px uppercase muted caption (card sub-headings, column labels). */
+  .caption { @apply text-2xs font-medium uppercase tracking-wider text-muted-foreground; }
+}

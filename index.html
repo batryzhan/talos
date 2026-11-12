@@ -1,1 +1,20 @@
-<!doctype html><html lang="ru"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TALOS · Industrial Swarm Lab</title></head><body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body></html>
+<!doctype html>
+<html lang="ru" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="dark light" />
+    <title>TALOS · Симулятор мультиагентных роботов</title>
+    <script>
+      // Apply the saved theme before first paint (no light/dark flash).
+      try {
+        var s = JSON.parse(localStorage.getItem('talos-ui') || '{}');
+        if (s.state && s.state.theme === 'light') document.documentElement.classList.remove('dark');
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

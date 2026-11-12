@@ -19,7 +19,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import type {
   AgentMessage, AgentState, HealthFlag, LiftDriveParams, MecanumGeometry, OperationMode, Pose2D,
-  SupportContactInput, SupportContactOutput, Twist2D, WheelId, WheelRates,
+  SupportContactInput, SupportContactOutput, Twist2D, WheelId, WheelRates, TerrainMotion,
 } from '../contracts/types';
 import { WHEEL_ORDER } from '../contracts/types';
 import { forwardKinematics, saturateUniform, slewUniform, twistToWheelRates, MECANUM_SIGNS } from './mecanum';
@@ -67,6 +67,7 @@ export type ForceSensorStatus = 'calibrated' | 'uncalibrated' | 'absent';
 
 export interface TalosRobotAgentOptions {
   id: number;
+  terrain?: TerrainMotion;
   /** Strafer model template (from loadStraferModel). It is cloned; omit for headless agents. */
   model?: THREE.Object3D;
   geometry?: Partial<MecanumGeometry>;
@@ -110,6 +111,9 @@ export class TalosRobotAgent {
   readonly slide: ViperSlideRig | null = null;
   readonly chassis: TalosChassis | null = null;
   private lastVisualTime = 0;
+  readonly terrain?: TerrainMotion;
+  get groundZ(): number { return this.terrain?.field.heightAt(this.pose.x, this.pose.y) ?? 0; }
+  get slopeDegrees(): number { const g=this.terrain?.field.gradientAt(this.pose.x,this.pose.y);return g?Math.atan(Math.hypot(g.x,g.y))*180/Math.PI:0; }
   readonly geometry: MecanumGeometry;
   readonly liftParams: LiftDriveParams;
   readonly forceSensor: ForceSensorStatus;
@@ -145,6 +149,7 @@ export class TalosRobotAgent {
 
   constructor(opts: TalosRobotAgentOptions) {
     this.id = opts.id;
+    this.terrain = opts.terrain;
     this.root.name = `talos_agent_${opts.id}`;
     this.geometry = { ...STRAFER_GEOMETRY, ...opts.geometry };
     this.liftParams = { ...DEFAULT_LIFT_PARAMS, ...opts.lift };
@@ -276,11 +281,21 @@ export class TalosRobotAgent {
 
     this.wheelRates = slewUniform(this.wheelRates, target, g.alphaMax * dt);
     const tw = forwardKinematics(this.wheelRates, g);
+    const terrain = this.terrain, field = terrain?.field;
+    const grad = field?.gradientAt(this.pose.x, this.pose.y);
+    const wx = tw.vx*Math.cos(this.pose.theta)-tw.vy*Math.sin(this.pose.theta);
+    const wy = tw.vx*Math.sin(this.pose.theta)+tw.vy*Math.cos(this.pose.theta);
+    const uphill = grad ? Math.max(0,grad.x*wx+grad.y*wy) : 0;
+    const kSlope = grad ? Math.max(.35,Math.min(1,1-Math.hypot(grad.x,grad.y)*(terrain?.slopeSlowdown??1.5))) : 1;
+    const speed = kSlope*(field?.speedAt?.(this.pose.x,this.pose.y)??1);
+    tw.vx*=speed;tw.vy*=speed;
+    const oldX=this.pose.x,oldY=this.pose.y;
     this.twist.vx = tw.vx; this.twist.vy = tw.vy; this.twist.omega = tw.omega;
     const c = Math.cos(this.pose.theta), s = Math.sin(this.pose.theta);
     this.pose.x += (tw.vx * c - tw.vy * s) * dt;
     this.pose.y += (tw.vx * s + tw.vy * c) * dt;
     this.pose.theta += tw.omega * dt;
+    if (field?.passable && !field.passable(this.pose.x,this.pose.y)) {this.pose.x=oldX;this.pose.y=oldY;}
     constrainPose?.(this.pose, this.footprint);
 
     // lift
@@ -290,7 +305,7 @@ export class TalosRobotAgent {
     // battery: chassis motors (4 × free current + load-proportional) + lift
     let iDrive = 0;
     for (const w of this.wheelRates) iDrive += 0.25 + 2.0 * Math.abs(w) / g.omegaMax;
-    const pTotal = 12 * iDrive + this.lift.elecPower + 2.0; // + 2 W electronics/radio
+    const pTotal = 12 * iDrive + this.lift.elecPower + 2.0 + uphill*(terrain?.uphillWatts??0) + (field?.extraWattsAt?.(this.pose.x,this.pose.y)??0); // + 2 W electronics/radio
     this.battery = Math.max(0, this.battery - (pTotal * dt) / this.batteryJ);
 
     // wheel / roller animation state
@@ -320,7 +335,7 @@ export class TalosRobotAgent {
     return {
       agentId: this.id,
       pad: { x: this.pose.x, y: this.pose.y },
-      padZ: PAD_BASE_Z + this.lift.h,
+      padZ: this.groundZ + PAD_BASE_Z + this.lift.h,
       padVel: this.lift.hDot,
       padHalfSize: PAD_HALF_SIZE,
       padHalfExtents: { ...PAD_HALF_EXTENTS },
@@ -401,8 +416,10 @@ export class TalosRobotAgent {
   // ───────────────────────── visuals ─────────────────────────
 
   syncVisuals(): void {
-    this.root.position.set(this.pose.x, this.pose.y, 0);
-    this.root.rotation.set(0, 0, this.pose.theta);
+    this.root.position.set(this.pose.x, this.pose.y, this.groundZ);
+    const grad=this.terrain?.field.gradientAt(this.pose.x,this.pose.y);
+    const c=Math.cos(this.pose.theta),s=Math.sin(this.pose.theta);
+    this.root.rotation.set(grad?Math.atan(-grad.x*s+grad.y*c):0,grad?-Math.atan(grad.x*c+grad.y*s):0,this.pose.theta);
     for (const w of this.wheels) {
       w.node.rotation.set(0, w.angle, 0);
       for (const r of w.rollers) r.node.quaternion.setFromAxisAngle(r.axis, r.angle);

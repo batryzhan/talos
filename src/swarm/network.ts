@@ -3,8 +3,8 @@
  * (one draw per unique edge per radio tick, both directions share it), transport delay d, and the
  * receiver-side filters: stale epoch, duplicate seq, age > maxAge, height ∉ [hMin, hMax], wrong task.
  */
-import type { AgentMessage, MessageRejectReason, NetworkParams } from '../contracts/types';
-import { buildEdges, type Edge } from './graph';
+import type { AgentMessage, MessageRejectReason, NetworkParams, RadioEnvironment } from '../contracts/types';
+import { buildEdges, terrainEdges, type Edge } from './graph';
 import type { Rng } from './rng';
 
 interface InFlight { to: number; msg: AgentMessage; deliverAt: number }
@@ -80,9 +80,9 @@ export class RadioNetwork {
    * One radio tick: every agent broadcasts `outbox[id]` (undefined = radio dead / silent).
    * One loss draw per unique edge (symmetric). `lossP` overrides params.lossP (fault injection).
    */
-  broadcast(now: number, outbox: Map<number, AgentMessage>, lossP = this.params.lossP): void {
+  broadcast(now: number, outbox: Map<number, AgentMessage>, lossP = this.params.lossP, environment?: RadioEnvironment): void {
     this.lastActiveEdges = [];
-    for (const [a, b] of this.edges) {
+    for (const [a, b] of environment ? terrainEdges(this.edges,environment) : this.edges) {
       const up = !this.rng.bernoulli(lossP);  // always draw → same stream regardless of silence
       const ia = this.ids[a], ib = this.ids[b];
       const ma = outbox.get(ia), mb = outbox.get(ib);

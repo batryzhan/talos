@@ -45,6 +45,8 @@ export interface SwarmFleetOptions {
   constrainPose?: Parameters<TalosRobotAgent['step']>[1];
   /** Defaults applied to every team's SwarmManager config. */
   defaults?: Partial<SwarmConfig>;
+  /** Optional slope policy for field hot-swaps; flat-world behaviour stays unchanged. */
+  slopePolicy?: { degreesAt: (p:Vec2)=>number; thresholdDegrees:number; marginMultiplier:number };
   /** Where charged reserves park (else they stay next to the charger). */
   reserveParking?: Record<number, Vec2>;
 }
@@ -91,7 +93,7 @@ export class SwarmFleet {
   private readonly docks: Dock[] = [];
   readonly chargers: ChargingStation[];
   private readonly rng: Rng;
-  private readonly o: Required<Omit<SwarmFleetOptions, 'constrainPose' | 'defaults' | 'reserveParking' | 'chargers' | 'seed'>> & SwarmFleetOptions;
+  private readonly o: Required<Omit<SwarmFleetOptions, 'constrainPose' | 'defaults' | 'reserveParking' | 'chargers' | 'seed' | 'slopePolicy'>> & SwarmFleetOptions;
   private t = 0;
   private ctrlAcc = DT_CTRL;
   private events: FleetEvent[] = [];
@@ -296,7 +298,10 @@ export class SwarmFleet {
       // support polygon without the leaving robot must keep ρ ≥ ρ_min
       const remaining = mgr.ids.filter(id => id !== low.id).map(id => mgr.supportOf(id)!).filter(Boolean);
       const rho = stabilityMargin(remaining, team.a.com ?? { x: 0, y: 0 });
-      if (!(rho >= mgr.config.safety.rhoMin)) return blocked(`ρ without agent ${low.id} = ${Number.isFinite(rho) ? rho.toFixed(3) : '−∞'} m < ρ_min`);
+      const slope=this.o.slopePolicy?.degreesAt(mgr.payloadReference)??0;
+      const relaxed=!!this.o.slopePolicy&&slope>this.o.slopePolicy.thresholdDegrees;
+      const rhoMin=mgr.config.safety.rhoMin*(relaxed?this.o.slopePolicy!.marginMultiplier:1);
+      if (!(rho >= (this.o.slopePolicy ? Math.max(0,rhoMin) : rhoMin))) return blocked(`ρ without agent ${low.id} = ${Number.isFinite(rho) ? rho.toFixed(3) : '−∞'} m < ρ_min`);
       const spot = supportPointWorld(mgr.payloadReference, r);
       const reserve = [...this.agentsById.values()]
         .filter(a => this.duty.get(a.id) === 'RESERVE' && a.battery >= this.o.reserveMinBattery)
@@ -314,7 +319,7 @@ export class SwarmFleet {
       mgr.setFrozen(true);
       this.duty.set(reserve.id, 'SWAP_IN');
       this.goals.set(reserve.id, { pos: staging, theta: mgr.payloadReference.theta + team.swap.headingOffset });
-      this.emit({ kind: 'hot-swap-start', teamId: team.a.teamId, agentId: low.id, detail: `b=${(low.battery * 100).toFixed(0)}% → reserve ${reserve.id}, ${charger.id}, ρ_remaining=${rho.toFixed(3)} m` });
+      this.emit({ kind: 'hot-swap-start', teamId: team.a.teamId, agentId: low.id, detail: `b=${(low.battery * 100).toFixed(0)}% → reserve ${reserve.id}, ${charger.id}, ρ_remaining=${rho.toFixed(3)} m${relaxed?`, уклон ${slope.toFixed(1)}°, порог ρ=${rhoMin.toFixed(3)} м`:""}` });
       return;
     }
 
@@ -432,6 +437,7 @@ export class SwarmFleet {
         contacts: world.contacts.filter(c => ids.has(c.agentId)),
         payload: t.a.payloadId ? world.payloads?.[t.a.payloadId] : undefined,
         faults: world.faults,
+        radioEnvironment: world.radioEnvironment,
       };
       const out = t.mgr.step(dt, w);
       teamOut.set(id, out);

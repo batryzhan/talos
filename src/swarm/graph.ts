@@ -3,7 +3,7 @@
  * Vertices are indices 0..N−1 (agent id = index + 1). Edges are UNIQUE undirected pairs (i < j):
  * for a ring with N = 2 there is exactly one edge (0,1), never two arcs.
  */
-import type { TopologyKind } from '../contracts/types';
+import type { RadioEnvironment, TerrainField, Vec2, TopologyKind } from '../contracts/types';
 import type { Rng } from './rng';
 
 export type Edge = readonly [number, number];
@@ -30,7 +30,8 @@ export function buildEdges(n: number, topology: TopologyKind): Edge[] {
  * Symmetric loss model M0: every unique edge is dropped independently with probability p,
  * a_ij(k) = a_ji(k). Draws exactly one random number per edge per step, in edge order.
  */
-export function sampleActiveEdges(edges: readonly Edge[], p: number, rng: Rng): Edge[] {
+export function sampleActiveEdges(edges: readonly Edge[], p: number, rng: Rng, environment?: RadioEnvironment): Edge[] {
+  if(environment)edges=terrainEdges(edges,environment);
   const out: Edge[] = [];
   for (const e of edges) if (!rng.bernoulli(p)) out.push(e);
   return out;
@@ -65,4 +66,23 @@ export function neighbors(n: number, edges: readonly Edge[]): number[][] {
 /** Largest degree of the full (loss-free) topology; ε must satisfy 0 < ε < 1/d_max. */
 export function maxDegree(n: number, edges: readonly Edge[]): number {
   return Math.max(0, ...degrees(n, edges));
+}
+
+/** Sample at half-metre intervals; endpoint heights include the antenna/mast offsets. */
+export function lineOfSight(a:Vec2,b:Vec2,terrain:TerrainField,antennaA=1.2,antennaB=antennaA):boolean {
+  const za=terrain.heightAt(a.x,a.y)+antennaA,zb=terrain.heightAt(b.x,b.y)+antennaB;
+  const steps=Math.max(2,Math.ceil(Math.hypot(b.x-a.x,b.y-a.y)/.5));
+  for(let i=1;i<steps;i++){const t=i/steps;if(terrain.heightAt(a.x+(b.x-a.x)*t,a.y+(b.y-a.y)*t)>za+(zb-za)*t)return false;}
+  return true;
+}
+export type RadioLinkKind='direct'|'blocked'|'relay';
+export function radioLink(a:Vec2,b:Vec2,env:RadioEnvironment):RadioLinkKind {
+  for(const r of env.relays??[])if(r.active&&Math.hypot(a.x-r.position.x,a.y-r.position.y)<=r.radius&&Math.hypot(b.x-r.position.x,b.y-r.position.y)<=r.radius)return 'relay';
+  return Math.hypot(a.x-b.x,a.y-b.y)<=(env.range??Infinity)&&lineOfSight(a,b,env.terrain,env.antennaHeight)?'direct':'blocked';
+}
+/** Add virtual relay edges to the topology, then reject occluded/out-of-range direct edges. */
+export function terrainEdges(edges:readonly Edge[],env:RadioEnvironment):Edge[]{
+  const candidates=new Map(edges.map(e=>[`${e[0]}:${e[1]}`,e]));
+  for(let i=0;i<env.positions.length;i++)for(let j=i+1;j<env.positions.length;j++)if(radioLink(env.positions[i],env.positions[j],env)==='relay')candidates.set(`${i}:${j}`,[i,j]);
+  return [...candidates.values()].filter(([i,j])=>radioLink(env.positions[i],env.positions[j],env)!=='blocked');
 }

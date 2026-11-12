@@ -1,8 +1,29 @@
-<!doctype html><html lang="ru"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TALOS · Industrial Swarm Lab</title>  <script type="module" crossorigin src="/assets/index-Bh02k3Mf.js"></script>
-  <link rel="modulepreload" crossorigin href="/assets/react-gxHn_UGl.js">
-  <link rel="modulepreload" crossorigin href="/assets/three-shaders-Bi8cCCOB.js">
-  <link rel="modulepreload" crossorigin href="/assets/three-CsiHuT49.js">
-  <link rel="modulepreload" crossorigin href="/assets/three-addons-ByYvnjE6.js">
-  <link rel="modulepreload" crossorigin href="/assets/simulation-CVrB3Pmk.js">
-  <link rel="stylesheet" crossorigin href="/assets/index-BcNvzAun.css">
-</head><body><div id="root"></div></body></html>
+<!doctype html>
+<html lang="ru" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="dark light" />
+    <title>TALOS · Симулятор мультиагентных роботов</title>
+    <script>
+      // Apply the saved theme before first paint (no light/dark flash).
+      try {
+        var s = JSON.parse(localStorage.getItem('talos-ui') || '{}');
+        if (s.state && s.state.theme === 'light') document.documentElement.classList.remove('dark');
+      } catch (e) {}
+    </script>
+    <script type="module" crossorigin src="/assets/index-Bo7VXslI.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/react-wRuxxkfm.js">
+    <link rel="modulepreload" crossorigin href="/assets/three-shaders-93PA5Ffs.js">
+    <link rel="modulepreload" crossorigin href="/assets/three-Bimg7SuF.js">
+    <link rel="modulepreload" crossorigin href="/assets/three-webgl-DWS2Exbn.js">
+    <link rel="modulepreload" crossorigin href="/assets/r3f-XqQn4zSG.js">
+    <link rel="modulepreload" crossorigin href="/assets/three-addons-Bhq5HU4G.js">
+    <link rel="modulepreload" crossorigin href="/assets/r3f-drei-DXisf17I.js">
+    <link rel="modulepreload" crossorigin href="/assets/charts-B1kdV12H.js">
+    <link rel="stylesheet" crossorigin href="/assets/index-Bt6rd-Pl.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

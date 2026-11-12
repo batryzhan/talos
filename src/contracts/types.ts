@@ -225,6 +225,7 @@ export interface SwarmConfig {
   controller: ControllerKind;
   network: NetworkParams;
   gains: LiftControlGains;
+  slopeCoordination?: SlopeCoordination;
   safety: SafetyLimits;
   /** Target lift height h* (m). */
   targetHeight: number;
@@ -261,6 +262,7 @@ export interface WorldState {
   contacts: SupportContactOutput[];
   payload?: PayloadState;
   faults?: FaultInjection;
+  radioEnvironment?: RadioEnvironment;
 }
 
 /** Group-level transport command (virtual platform, formula 16), world frame. */
@@ -449,6 +451,7 @@ export interface FleetWorldState {
   /** Payload states by payloadId (from src/physics). */
   payloads?: Record<string, PayloadState>;
   faults?: FaultInjection;
+  radioEnvironment?: RadioEnvironment;
 }
 
 export interface TeamTelemetry {
@@ -488,4 +491,30 @@ export interface FleetStepOutput {
   states: AgentState[];
   chargers: ChargingStation[];
   events: FleetEvent[];
+}
+
+// Optional field-environment contracts. Existing flat-world callers need no changes.
+export interface TerrainField {
+  heightAt(x: number, y: number): number;
+  gradientAt(x: number, y: number): Vec2;
+  speedAt?(x: number, y: number): number;
+  extraWattsAt?(x: number, y: number): number;
+  passable?(x: number, y: number): boolean;
+}
+export interface TerrainMotion {
+  field: TerrainField;
+  slopeSlowdown?: number;
+  uphillWatts?: number;
+}
+export interface RadioRelay { position: Vec2; radius: number; active: boolean }
+export interface RadioEnvironment {
+  terrain: TerrainField;
+  positions: readonly Vec2[];
+  antennaHeight?: number;
+  range?: number;
+  relays?: readonly RadioRelay[];
+}
+export interface SlopeCoordination {
+  thresholdDegrees: number;
+  couplingMultiplier: number;
 }

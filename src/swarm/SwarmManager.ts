@@ -190,6 +190,18 @@ export class SwarmManager {
   modeOf(id: number) { return this.member(id).fsm.mode; }
   fsmHistory(id: number) { return this.member(id).fsm.history; }
   rejectedPackets(id: number) { return { ...this.member(id).table.rejected }; }
+  /**
+   * Seconds since the freshest accepted packet crossed the radio link a↔b (either direction),
+   * on the receivers' local clocks; Infinity if the link never delivered. Read-only telemetry.
+   */
+  linkAge(a: number, b: number): number {
+    let age = Infinity;
+    const ma = this.byId.get(a), mb = this.byId.get(b);
+    const ea = ma?.table.entries.get(b), eb = mb?.table.entries.get(a);
+    if (ma && ea) age = Math.min(age, ma.agent.localTime - ea.receivedAt);
+    if (mb && eb) age = Math.min(age, mb.agent.localTime - eb.receivedAt);
+    return age;
+  }
 
   private member(id: number): Member {
     const m = this.byId.get(id);
@@ -198,6 +210,9 @@ export class SwarmManager {
   }
 
   // ───────────────────────── configuration ─────────────────────────
+
+  /** Rebase an external terrain planner on measured odometry to prevent reference windup. */
+  setPayloadReference(pose: Pose2D): void { Object.assign(this.payloadRef,pose); }
 
   setController(kind: ControllerKind): void { this.config.controller = kind; }
   setTargetHeight(h: number): void { this.config.targetHeight = h; for (const m of this.members) m.liftDone = false; }
@@ -325,7 +340,7 @@ export class SwarmManager {
     const dead = new Set(world.faults?.radioDead ?? []);
     const outbox = new Map<number, ReturnType<TalosRobotAgent['buildMessage']>>();
     for (const m of this.members) if (!dead.has(m.agent.id)) outbox.set(m.agent.id, m.agent.buildMessage(this.config.task, m.epoch));
-    this.network.broadcast(this.t, outbox, world.faults?.lossP ?? this.config.network.lossP);
+    this.network.broadcast(this.t, outbox, world.faults?.lossP ?? this.config.network.lossP, world.radioEnvironment ? {...world.radioEnvironment,positions:this.members.map(m=>m.agent.pose)} : undefined);
   }
 
   // ───────────────────────── control (50 Hz) ─────────────────────────
@@ -448,7 +463,7 @@ export class SwarmManager {
       h: m.agent.lift.h,
       ownLoad: this.ownLoad(m),
       neighbors: this.neighborHeights(m),
-      gains: this.config.gains,
+      gains: { ...this.config.gains, kc: this.config.gains.kc * (this.config.controller==='C' && this.config.slopeCoordination && m.agent.slopeDegrees > this.config.slopeCoordination.thresholdDegrees ? this.config.slopeCoordination.couplingMultiplier : 1) },
       drive: m.agent.liftParams,
     }).u;
   }
