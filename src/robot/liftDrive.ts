@@ -101,10 +101,11 @@ export interface LiftStepInput {
 }
 
 /** Integrate the slide by dt. Mutates and returns `s`. */
+const motorCurrent = (p: LiftDriveParams, tf: number): number => p.freeCurrent + (p.stallCurrent - p.freeCurrent) * Math.min(1, Math.max(0, tf));
+
 export function stepLift(s: LiftState, p: LiftDriveParams, inp: LiftStepInput, dt: number): LiftState {
   const frac = torqueFraction(p, inp.loadForce);
   const fReq = requiredForce(p, inp.loadForce);
-  const motorCurrent = (tf: number) => p.freeCurrent + (p.stallCurrent - p.freeCurrent) * Math.min(1, Math.max(0, tf));
 
   if (inp.lock || inp.fault) {
     // Position lock: height frozen. Active electrical hold draws the holding current, capped at
@@ -112,7 +113,7 @@ export function stepLift(s: LiftState, p: LiftDriveParams, inp: LiftStepInput, d
     s.locked = true;
     s.hDot = 0;
     s.overloaded = false;
-    s.current = p.motors * motorCurrent(frac);
+    s.current = p.motors * motorCurrent(p, frac);
     s.mechPower = 0;
     s.elecPower = BUS_VOLTAGE * s.current;
     return s;
@@ -135,7 +136,7 @@ export function stepLift(s: LiftState, p: LiftDriveParams, inp: LiftStepInput, d
   if (s.h <= p.hMin) { s.h = p.hMin; if (s.hDot < 0) s.hDot = 0; }
   if (s.h >= p.hMax) { s.h = p.hMax; if (s.hDot > 0) s.hDot = 0; }
 
-  s.current = p.motors * motorCurrent(s.hDot >= 0 ? frac : frac * 0.3);
+  s.current = p.motors * motorCurrent(p, s.hDot >= 0 ? frac : frac * 0.3);
   s.mechPower = fReq * s.hDot;
   s.elecPower = BUS_VOLTAGE * s.current;
   return s;

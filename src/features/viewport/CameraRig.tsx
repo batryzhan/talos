@@ -79,5 +79,5 @@ export function CameraRig({ engine, mission }: { engine: Engine; mission: Missio
     engine.pad.setCameraYaw(Math.atan2(camera.position.y - scratch.target.y, camera.position.x - scratch.target.x));
   });
 
-  return <CameraControls ref={controls} makeDefault minDistance={0.8} maxDistance={mission.mode===5?190:90} maxPolarAngle={1.48} smoothTime={0.22} draggingSmoothTime={0.08} dollySpeed={0.6} />;
+  return <CameraControls ref={controls} makeDefault minDistance={0.8} maxDistance={mission.maxDistance} maxPolarAngle={1.48} smoothTime={0.22} draggingSmoothTime={0.08} dollySpeed={0.6} />;
 }

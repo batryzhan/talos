@@ -1,6 +1,7 @@
 import {describe,it,expect} from 'vitest';
 import * as T from 'three';
-import {buildConstruction,buildFactory} from './IndustrialEnvironment';
+import {buildConstruction} from './IndustrialEnvironment';
+import {buildFactoryHall as buildFactory} from './FactoryEnvironment';
 describe('industrial environment compilation',()=>{
  for(const [name,build] of [['construction',buildConstruction],['factory',buildFactory]] as const){
   it(`${name}: finite, batched geometry with floor support and authored height`,()=>{

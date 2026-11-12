@@ -20,9 +20,6 @@ export interface FleetRow {
   /** Stability margin of the team payload (m). */
   rho: number | null;
   epoch: number | null;
-  slope?:number;
-  routeSeconds?:number;
-  duty?:string;
 }
 
 export interface TeamMetrics { eh: number | null; rho: number | null; epoch: number }

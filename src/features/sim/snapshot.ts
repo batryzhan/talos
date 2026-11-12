@@ -1,12 +1,10 @@
 import type { Engine } from '@/platform/Engine';
-import { MetamorphicScene } from '@/simulation/environments/MetamorphicScene';
-import { stressLevel } from '@/core/metamorphic/docking';
 import { buildFleetRows, type FleetSource, type TrendBuffers } from '@/features/telemetry/rows';
 import { perf } from '@/features/viewport/perf';
-import type { MacroSnapshot, SimSnapshot, TeamSnapshot } from './simStore';
+import type { SimSnapshot, TeamSnapshot } from './simStore';
+import { calibrationSnapshot } from '@/core/calibration/snapshot';
 
 const EVENTS_SHOWN = 60;
-const RESIDUAL_TREND = 40;
 
 /** Read-only adapter from the Engine to the fleet-row builder. */
 export function engineFleetSource(e: Engine): FleetSource {
@@ -24,64 +22,29 @@ export function engineFleetSource(e: Engine): FleetSource {
   };
 }
 
-function macroSnapshot(scene: MetamorphicScene, residualTrend: number[]): MacroSnapshot {
-  const h = scene.hud;
-  if (residualTrend.length >= RESIDUAL_TREND) residualTrend.shift();
-  residualTrend.push(h.residual);
-  const workers = h.required;
-  return {
-    locked: h.locked,
-    lockedCount: h.lockedCount,
-    required: h.required,
-    assembling: !h.locked && h.dockStatus.some(d => d !== 'DISCONNECTED'),
-    totalCurrent: h.totalCurrent,
-    residual: h.residual,
-    residualTrend: [...residualTrend],
-    saturation: h.saturation,
-    peakStress: h.peakStress,
-    stress: stressLevel(h.peakStress),
-    routeStatus: h.routeStatus,
-    routeCost: h.routeCost,
-    bridgeStatus: h.bridgeStatus,
-    quorum: h.quorumStatus,
-    delivery: h.delivery,
-    epoch: h.epoch,
-    chassis: Array.from({ length: MetamorphicScene.ROBOTS }, (_, i) => ({
-      id: i + 1,
-      role: i < workers ? 'worker' as const : 'reserve' as const,
-      latch: h.dockStatus[i] ?? 'DISCONNECTED',
-      power: h.chassisPower[i] ?? 0,
-    })),
-  };
-}
-
-export interface SnapshotBuffers { trends: TrendBuffers; residual: number[] }
+export interface SnapshotBuffers { trends: TrendBuffers }
 
 /** One 4 Hz poll of the engine → plain data for React. */
 export function buildSnapshot(e: Engine, buffers: SnapshotBuffers): SimSnapshot {
   const ready = e.phase === 'ready';
-  const teams: TeamSnapshot[] = ready
-    ? e.fleet.teamIds.map(id => ({ id, phase: e.fleet.teamPhase(id) ?? null, robots: e.fleet.team(id)?.ids.length ?? 0 }))
-    : [];
+  const w = ready ? e.workflow : undefined;
+  const teams: TeamSnapshot[] = !ready ? [] : w
+    ? w.teams.map(t => ({ id: t.id, phase: null, robots: w.members(t.id).length }))
+    : e.fleet.teamIds.map(id => ({ id, phase: e.fleet.teamPhase(id) ?? null, robots: e.fleet.team(id)?.ids.length ?? 0 }));
   const events = e.history.slice(-EVENTS_SHOWN).reverse();
   return {
     phase: e.phase,
     progress: e.loadProgress,
     error: e.error,
-    time: e.metamorphic ? e.metamorphic.clock.time : e.time,
+    time: e.time,
     holding: e.holding,
     fps: perf.fps,
     frameMs: perf.frameMs,
-    rows: ready ? buildFleetRows(engineFleetSource(e), buffers.trends).map(row=>e.rescue?{
-      ...row, slope:e.agents[row.id-1].slopeDegrees,
-      routeSeconds:e.rescue.routeEstimate(e.teamOf(row.id)??'Alpha'),
-      duty: row.team ? undefined : e.fleet.dutyOf(row.id),
-      rho:row.team==='Alpha'?e.rescue.rho:row.rho,
-    }:row) : [],
+    rows: ready && !w ? buildFleetRows(engineFleetSource(e), buffers.trends) : [],
     teams,
     events,
     logCount: e.logs.length,
-    rescue: e.rescue?.snapshot,
-    macro: e.metamorphic && ready ? macroSnapshot(e.metamorphic, buffers.residual) : null,
+    workflow: w ? w.snapshot() : null,
+    calibration: ready && e.calibration && e.agents[0] ? calibrationSnapshot(e.calibration, e.agents[0]) : null,
   };
 }

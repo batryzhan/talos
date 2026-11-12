@@ -44,10 +44,10 @@ export function useEngineSession(mission: MissionDef): Engine | null {
     // Pad focus (Tab, LB/RB, Y) → selection. Initialised when the engine becomes ready so the
     // mission's default focus does not fly the camera away on load.
     let padFocus: string | null = null;
-    const buffers = { trends: createTrendBuffers(), residual: [] as number[] };
+    const buffers = { trends: createTrendBuffers() };
     const poll = (): void => {
       if (e.disposed) return;
-      if(e.rescue)e.rescue.learning=useUiStore.getState().routeLearning;
+      if (e.workflow) e.workflow.learning = useUiStore.getState().routeLearning;
       if(import.meta.env.DEV)Object.assign(window,{__talosEngine:e});
       useSimStore.setState({ snap: buildSnapshot(e, buffers) });
       if (e.phase !== 'ready') return;
@@ -98,7 +98,7 @@ export function useEngineSession(mission: MissionDef): Engine | null {
 
 /** Selecting a robot or team in the UI also hands the keyboard / gamepad to that team. */
 function driveFocus(e: Engine, selection: Selection, remember: (key: string) => void): void {
-  if (!selection || e.metamorphic) return;
+  if (!selection) return;
   const pad = e.pad;
   if (e.mode === 0) {
     if (selection.kind === 'agent') { pad.setState({ focus: { kind: 'agent', agentId: selection.id } }); remember(`a${selection.id}`); }

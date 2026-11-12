@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { useShallow } from 'zustand/react/shallow';
 import type { Engine } from '@/platform/Engine';
@@ -15,8 +15,9 @@ import { EngineeringOverlay } from './EngineeringOverlay';
 import { TeamLabels } from './TeamLabels';
 import { Effects } from './Effects';
 import { ViewportHud, ViewportLoading, ViewportError } from './ViewportHud';
+import { WorkflowBadges } from './WorkflowBadges';
+import { CalibrationOverlay } from './CalibrationOverlay';
 
-const FieldRobotLOD=lazy(()=>import('@/features/rescue/FieldRobotLOD'));
 
 function webglAvailable(): boolean {
   try {
@@ -60,7 +61,7 @@ export function Viewport({ engine, mission }: { engine: Engine; mission: Mission
           flat
           dpr={[1, 1.75]}
           gl={{ antialias: false, powerPreference: 'high-performance', stencil: false }}
-          camera={{ fov: 45, near: 0.05, far: 250, up: [0, 0, 1], position: [...mission.camera.position] }}
+          camera={{ fov: 45, near: 0.05, far: 320, up: [0, 0, 1], position: [...mission.camera.position] }}
           onPointerMissed={() => useUiStore.getState().select(null)}
         >
           <SimulationDriver engine={engine} />
@@ -68,11 +69,12 @@ export function Viewport({ engine, mission }: { engine: Engine; mission: Mission
           <SceneSetup mission={mission} />
           {(mission.mode === 0) && <LabFloor />}
           <primitive object={engine.scene} />
-          {mission.mode===5&&ready&&<Suspense fallback={null}><FieldRobotLOD engine={engine} /></Suspense>}
+          {ready && engine.workflow && <WorkflowBadges engine={engine} />}
           <CameraRig engine={engine} mission={mission} />
           {ready && engine.agents.length > 0 && <ShadowProxies key={`shadow-${engine.agents.length}`} engine={engine} />}
           {ready && <RobotPicking key={`pick-${engine.agents.length}`} engine={engine} />}
           {ready && overlay && <EngineeringOverlay engine={engine} />}
+          {ready && engine.calibration && <CalibrationOverlay engine={engine} />}
           {ready && payloadTeams.length > 0 && <TeamLabels engine={engine} teams={payloadTeams} />}
           <Effects />
         </Canvas>

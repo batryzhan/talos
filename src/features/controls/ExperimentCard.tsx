@@ -50,15 +50,16 @@ export function ExperimentCard({ mode }: { mode: number }): JSX.Element {
   const camera = useUiStore(s => s.camera);
   const powerLimit = useUiStore(s => s.powerLimit);
   const { setLossP, setOverlay, setCamera, setPowerLimit } = useUiStore.getState();
-  const teams = mode === 1 || mode === 2 || mode===5;
-  const learning=useUiStore(s=>s.routeLearning);
+  const liftTeams = mode === 1;
+  const workflow = mode >= 2;
+  const learning = useUiStore(s => s.routeLearning);
   const radio = mode !== 0;
 
   return (
     <Card>
       <CardHeader><CardTitle><FlaskConical aria-hidden />{t('experiment.title')}</CardTitle></CardHeader>
       <CardContent className="space-y-4">
-        {teams && <ControllerSelect />}
+        {liftTeams && <ControllerSelect />}
 
         {radio && (
           <div className="space-y-1.5">
@@ -77,11 +78,13 @@ export function ExperimentCard({ mode }: { mode: number }): JSX.Element {
           </div>
         )}
 
-        {mode===5&&<div className="flex items-start justify-between gap-3">
-          <div className="space-y-0.5"><Label htmlFor={`${overlayId}-learn`}>{t('experiment.learning')}: {learning?'вкл':'выкл'}</Label><p className="text-2xs text-muted-foreground">{t('experiment.learning.hint')}</p></div>
-          <Switch id={`${overlayId}-learn`} checked={learning} onCheckedChange={useUiStore.getState().setRouteLearning} />
-        </div>}
-        {teams && (
+        {workflow && (
+          <div className="flex items-start justify-between gap-3">
+            <div className="space-y-0.5"><Label htmlFor={`${overlayId}-learn`}>{t('experiment.learning')}</Label><p className="text-2xs text-muted-foreground">{t('experiment.learning.hint')}</p></div>
+            <Switch id={`${overlayId}-learn`} checked={learning} onCheckedChange={useUiStore.getState().setRouteLearning} />
+          </div>
+        )}
+        {(liftTeams || workflow) && (
           <div className="flex items-start justify-between gap-3">
             <div className="space-y-0.5">
               <Label htmlFor={overlayId}>{t('experiment.overlay')}</Label>

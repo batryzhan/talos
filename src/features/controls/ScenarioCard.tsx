@@ -6,18 +6,17 @@ import { useT } from '@/i18n';
 import { cn } from '@/lib/utils';
 import type { MissionDef } from '@/app/missions';
 import { HeavyConstructionSim } from '@/missions/HeavyConstructionSim';
-import { SmartFactorySim } from '@/missions/SmartFactorySim';
 import { useUiStore } from '@/store/ui';
 import { useSim } from '@/features/sim/simStore';
 
 interface TeamInfo { id: string; robots: number; mass: number }
 
 function planOf(mission: MissionDef): { teams: TeamInfo[]; route?: { x: number; y: number }[]; reserves: number[]; chargers: number } {
-  if (mission.mode === 1 || mission.mode === 2) {
-    const plan = mission.mode === 1 ? new HeavyConstructionSim() : new SmartFactorySim();
+  if (mission.mode === 1) {
+    const plan = new HeavyConstructionSim();
     return {
       teams: plan.teams.map(s => ({ id: s.teamId, robots: s.agentIds.length, mass: s.mass ?? 0 })),
-      route: mission.mode === 1 ? (plan as HeavyConstructionSim).route : undefined,
+      route: plan.route,
       reserves: plan.reserves,
       chargers: plan.chargers.length,
     };
@@ -25,7 +24,7 @@ function planOf(mission: MissionDef): { teams: TeamInfo[]; route?: { x: number; 
   return { teams: [], reserves: [], chargers: 0 };
 }
 
-/** Mission brief: what happens, which teams carry what, route / reserves; teams focus the camera. */
+/** Lift-team mission brief (calibration, construction): teams, payload masses, route, reserves. */
 export function ScenarioCard({ mission }: { mission: MissionDef }): JSX.Element {
   const t = useT();
   const plan = useMemo(() => planOf(mission), [mission]);
@@ -76,16 +75,6 @@ export function ScenarioCard({ mission }: { mission: MissionDef }): JSX.Element 
         )}
 
         {mission.mode === 0 && <Fact label={t('scenario.payload')} value={t('scenario.single')} />}
-        {mission.mode === 4 && (
-          <button
-            type="button"
-            onClick={() => select({ kind: 'team', id: 'MACRO' })}
-            className="flex w-full items-center justify-between rounded-md border px-2.5 py-1.5 text-sm transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <span className="font-medium">{t('scenario.macroTeam')} 2×2</span>
-            <span className="text-xs text-muted-foreground">{t('scenario.macroDetail')}</span>
-          </button>
-        )}
         {last && plan.route && (
           <Fact
             icon={<MapPinned className="size-3.5" aria-hidden />}

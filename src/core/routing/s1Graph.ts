@@ -1,21 +1,26 @@
 /**
  * S1 navigation graph: bidirectional weighted graph with dynamic edge states and Dijkstra / A*
- * shortest paths (CLAUDE.md §5.3, item 3).
+ * shortest paths (scientific documentation §2.5, experiment S1).
  *
- * An edge is traversable when it is OPEN, or when it is a PASSABLE_STRUCTURE (a bridge of locked
- * chassis) whose load rating covers the payload. CLOSED edges are never traversed; the distance
- * across a cut graph is d = ∞.
+ * OPEN edges are traversable; CLOSED edges (blocked corridor, roof collapse, fire front) are never
+ * traversed, and the distance across a cut graph is d = ∞.
  *
- * Planning runs at event rate (topology changes, new missions), not in the simulation loop.
+ * Edge cost defaults to the geometric length. A caller-supplied `cost` turns the search into a
+ * travel-time search (learned estimates t̂_e, equation 6); A* then needs `heuristicPerMeter`, a lower
+ * bound of cost per metre (1 / v_max), to stay admissible.
+ *
+ * Planning runs at event rate (topology changes, new tasks), not in the simulation loop.
  */
 import type {
   S1Algorithm, S1ClosureReason, S1Edge, S1EdgeState, S1Node, S1Route,
-} from '../../types/metamorphic';
+} from '../../types/routing';
 
 export interface RouteOptions {
   algorithm?: S1Algorithm;
-  /** Mass carried along the route (kg); checked against bridge load ratings. */
-  payloadKg?: number;
+  /** Edge cost (default: length). Must be positive. */
+  cost?: (edge: S1Edge) => number;
+  /** A* heuristic scale: admissible lower bound of cost per metre (default 1 without `cost`, else 0). */
+  heuristicPerMeter?: number;
 }
 
 /** Binary min-heap of (priority, node index) pairs on typed arrays. */
@@ -69,6 +74,16 @@ export class S1Graph {
   private readonly incident: number[][] = [];
   /** Bumped on every topology or state change; lets renderers refresh lazily. */
   version = 0;
+  /** Search workspace, reused by every query while the topology size is unchanged. */
+  private ws: { n: number; m: number; done: Uint8Array; heap: MinHeap; dist: Float64Array; via: Int32Array } | null = null;
+
+  private workspace(): { done: Uint8Array; heap: MinHeap; dist: Float64Array; via: Int32Array } {
+    const n = this.nodeList.length, m = this.edgeList.length;
+    if (!this.ws || this.ws.n !== n || this.ws.m !== m) {
+      this.ws = { n, m, done: new Uint8Array(n), heap: new MinHeap(Math.max(1, 2 * m + 1)), dist: new Float64Array(n), via: new Int32Array(n) };
+    }
+    return this.ws;
+  }
 
   get nodes(): readonly S1Node[] { return this.nodeList; }
   get edges(): readonly S1Edge[] { return this.edgeList; }
@@ -130,35 +145,26 @@ export class S1Graph {
     this.setEdgeState(id, { status: 'OPEN' });
   }
 
-  /** Turn an edge into a bridge of locked chassis. */
-  insertStructure(id: number, maxLoadKg: number, agentIds: readonly number[]): void {
-    this.setEdgeState(id, { status: 'PASSABLE_STRUCTURE', traversable: true, maxLoadKg, agentIds: [...agentIds] });
-  }
-
-  isTraversable(e: S1Edge, payloadKg = 0): boolean {
-    switch (e.state.status) {
-      case 'OPEN': return true;
-      case 'CLOSED': return false;
-      case 'PASSABLE_STRUCTURE': return payloadKg <= e.state.maxLoadKg;
-    }
+  isTraversable(e: S1Edge): boolean {
+    return e.state.status === 'OPEN';
   }
 
   /** Shortest-path distances from `from` to every node (index order of `nodes`); ∞ if cut off. */
-  distancesFrom(from: number, payloadKg = 0): Float64Array {
+  distancesFrom(from: number, options: RouteOptions = {}): Float64Array {
     const n = this.nodeList.length, dist = new Float64Array(n).fill(Infinity);
-    this.search(this.indexOf(from), -1, payloadKg, false, dist, null);
+    this.search(this.indexOf(from), -1, options, false, dist, null);
     return dist;
   }
 
   /** d(from, to); Infinity when the graph is disconnected between them. */
-  distance(from: number, to: number, payloadKg = 0): number {
-    return this.distancesFrom(from, payloadKg)[this.indexOf(to)];
+  distance(from: number, to: number, options: RouteOptions = {}): number {
+    return this.distancesFrom(from, options)[this.indexOf(to)];
   }
 
   shortestPath(from: number, to: number, options: RouteOptions = {}): S1Route {
-    const n = this.nodeList.length, src = this.indexOf(from), dst = this.indexOf(to);
-    const dist = new Float64Array(n).fill(Infinity), viaEdge = new Int32Array(n).fill(-1);
-    this.search(src, dst, options.payloadKg ?? 0, options.algorithm === 'astar', dist, viaEdge);
+    const src = this.indexOf(from), dst = this.indexOf(to), ws = this.workspace();
+    const dist = ws.dist.fill(Infinity), viaEdge = ws.via.fill(-1);
+    this.search(src, dst, options, options.algorithm === 'astar', dist, viaEdge);
     if (!Number.isFinite(dist[dst])) return { status: 'UNREACHABLE', cost: Infinity };
     const nodes: number[] = [to], edges: number[] = [];
     for (let i = dst; i !== src;) {
@@ -177,13 +183,14 @@ export class S1Graph {
    * Dijkstra (heuristic off) or A* with the Euclidean heuristic. Stops early at `dst` if dst ≥ 0.
    * The heuristic is admissible and consistent because edge length ≥ node distance.
    */
-  private search(src: number, dst: number, payloadKg: number, astar: boolean, dist: Float64Array, viaEdge: Int32Array | null): void {
-    const n = this.nodeList.length, done = new Uint8Array(n);
-    const heap = new MinHeap(Math.max(1, 2 * this.edgeList.length + 1));
+  private search(src: number, dst: number, options: RouteOptions, astar: boolean, dist: Float64Array, viaEdge: Int32Array | null): void {
+    const ws = this.workspace(), done = ws.done.fill(0), heap = ws.heap;
+    heap.size = 0;
     const goal = dst >= 0 ? this.nodeList[dst] : null;
-    const h = (i: number): number => (astar && goal ? Math.hypot(this.nodeList[i].x - goal.x, this.nodeList[i].y - goal.y) : 0);
+    const cost = options.cost, scale = astar && goal ? options.heuristicPerMeter ?? (cost ? 0 : 1) : 0;
+    const gx = goal?.x ?? 0, gy = goal?.y ?? 0, nodes = this.nodeList;
     dist[src] = 0;
-    heap.push(h(src), src);
+    heap.push(scale * Math.hypot(nodes[src].x - gx, nodes[src].y - gy), src);
     while (heap.size > 0) {
       const u = heap.pop();
       if (done[u]) continue;
@@ -192,13 +199,13 @@ export class S1Graph {
       const uid = this.nodeList[u].id;
       for (const eid of this.incident[u]) {
         const e = this.edgeList[eid];
-        if (!this.isTraversable(e, payloadKg)) continue;
+        if (!this.isTraversable(e)) continue;
         const v = this.indexOf(e.a === uid ? e.b : e.a);
-        const d = dist[u] + e.length;
+        const d = dist[u] + (cost ? cost(e) : e.length);
         if (d < dist[v]) {
           dist[v] = d;
           if (viaEdge) viaEdge[v] = eid;
-          heap.push(d + h(v), v);
+          heap.push(d + scale * Math.hypot(nodes[v].x - gx, nodes[v].y - gy), v);
         }
       }
     }

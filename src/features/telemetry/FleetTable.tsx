@@ -11,7 +11,7 @@ const TONE_TEXT = { success: 'text-success', warning: 'text-warning', destructiv
 const LOW_BATTERY = 0.25;
 
 /** `hasTeams`: robots without a team are reserves; in single-robot modes there are no teams at all. */
-export function fleetColumns(t: Translate, hasTeams = true, field=false): ColumnDef<FleetRow>[] {
+export function fleetColumns(t: Translate, hasTeams = true): ColumnDef<FleetRow>[] {
   return [
     {
       id: 'id', header: t('col.id'), accessorFn: r => r.id,
@@ -24,7 +24,7 @@ export function fleetColumns(t: Translate, hasTeams = true, field=false): Column
     },
     {
       id: 'state', header: t('col.state'), accessorFn: r => r.state,
-      cell: ({ row }) => <Badge tone={stateTone(row.original.state)}>{row.original.duty ? ({RESERVE:'Ожидание',SWAP_IN:'Выезд',TO_CHARGER:'На базу',CHARGING:'Зарядка'}[row.original.duty]??row.original.state) : row.original.state}</Badge>,
+      cell: ({ row }) => <Badge tone={stateTone(row.original.state)}>{row.original.state}</Badge>,
     },
     {
       id: 'force', header: t('col.force'), accessorFn: r => r.force ?? undefined, sortUndefined: 'last',
@@ -64,10 +64,6 @@ export function fleetColumns(t: Translate, hasTeams = true, field=false): Column
       cell: ({ row }) => <Num value={fmt(row.original.rho, 3)} className={TONE_TEXT[rhoTone(row.original.rho)]} />,
       meta: { align: 'right', unit: t('unit.m'), hint: t('col.rho.hint') },
     },
-    ...(field ? [
-      {id:'slope',header:t('col.slope'),accessorFn:(r:FleetRow)=>r.slope,cell:({row}:{row:{original:FleetRow}})=><Num value={`${fmt(row.original.slope??0,1)}° / ${fmt(Math.tan((row.original.slope??0)*Math.PI/180)*100,0)}%`} />,meta:{align:'right' as const}},
-      {id:'route',header:t('col.route'),accessorFn:(r:FleetRow)=>r.routeSeconds,cell:({row}:{row:{original:FleetRow}})=><Num value={fmt(row.original.routeSeconds??0,1)} />,meta:{align:'right' as const,unit:t('unit.s')}},
-    ] : []),
     {
       id: 'epoch', header: t('col.epoch'), accessorFn: r => r.epoch ?? undefined, sortUndefined: 'last',
       cell: ({ row }) => <Num value={row.original.epoch === null ? '—' : String(row.original.epoch)} className="text-muted-foreground" />,
@@ -86,8 +82,7 @@ export interface FleetTableProps {
 /** Fleet telemetry: one row per robot, sortable, click / Enter focuses the camera on the robot. */
 export function FleetTable({ rows, selectedId, onSelect, hasTeams = true }: FleetTableProps): JSX.Element {
   const t = useT();
-  const field=rows.some(r=>r.slope!==undefined);
-  const columns = useMemo(() => fleetColumns(t, hasTeams,field), [t, hasTeams,field]);
+  const columns = useMemo(() => fleetColumns(t, hasTeams), [t, hasTeams]);
   return (
     <DataTable
       data={rows}

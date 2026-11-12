@@ -46,8 +46,8 @@ export function ViewportHud(): JSX.Element {
   const phase = useSim(s => s.phase);
   const selection = useUiStore(s => s.selection);
   const select = useUiStore(s => s.select);
-  const rescue=useSim(s=>s.rescue);
-  const overlay=useUiStore(s=>s.overlay);
+  const workflow = useSim(s => s.workflow?.kind ?? null);
+  const overlay = useUiStore(s => s.overlay);
   const slow = phase === 'ready' && fps < FPS_ALERT;
 
   return (
@@ -55,7 +55,6 @@ export function ViewportHud(): JSX.Element {
       <div className="pointer-events-none absolute left-3 top-3 flex items-center gap-2">
         <div className="pointer-events-auto flex items-center gap-2 rounded-md border bg-panel/80 px-2 py-1 shadow-sm backdrop-blur">
           <StatusBadge />
-          {rescue&&<Badge tone="primary">{{FORMING:'Формирование',SEARCH:'Поиск',RELAY:'Реле',EVACUATION:'Эвакуация',COMPLETE:'Завершено'}[rescue.phase]}</Badge>}
           <Hint label={t('hud.time')}>
             <span className="num text-xs text-foreground" tabIndex={0}>
               {time.toFixed(1)}<span className="ml-0.5 font-sans text-2xs text-muted-foreground">{t('unit.s')}</span>
@@ -64,9 +63,7 @@ export function ViewportHud(): JSX.Element {
         </div>
       </div>
 
-      {rescue&&overlay&&<div className="pointer-events-none absolute bottom-3 right-3 space-y-1 rounded-md border bg-panel/90 p-2 text-2xs backdrop-blur">
-        <p className="font-medium">Рельеф / радиосеть</p><p className="text-success">━ Прямая видимость</p><p className="text-destructive">━ Закрыто рельефом</p><p className="text-info">┄ Через реле · 25 м</p><p className="text-warning">━ Маршрут Alpha · изолинии 1 м</p>
-      </div>}
+      {workflow && overlay && <OverlayLegend kind={workflow} />}
       <AnimatePresence>
         {slow && (
           <motion.div
@@ -145,6 +142,25 @@ export function ViewportError(): JSX.Element | null {
           {t('common.retry')}
         </Button>
       </div>
+    </div>
+  );
+}
+
+const LEGEND: Record<'factory' | 'wildfire' | 'mining', [MessageKey, string][]> = {
+  factory: [['legend.open', 'bg-info'], ['legend.fast', 'bg-success'], ['legend.slow', 'bg-warning'], ['legend.closed', 'bg-destructive'], ['legend.route', 'bg-primary']],
+  wildfire: [['legend.radio', 'bg-success'], ['legend.relay', 'bg-info'], ['legend.closed', 'bg-destructive'], ['legend.route', 'bg-warning']],
+  mining: [['legend.scanned', 'bg-success'], ['legend.unknown', 'bg-muted-foreground'], ['legend.closed', 'bg-destructive'], ['legend.route', 'bg-warning']],
+};
+
+/** Key of the engineering layer drawn inside the workflow scenes. */
+function OverlayLegend({ kind }: { kind: 'factory' | 'wildfire' | 'mining' }): JSX.Element {
+  const t = useT();
+  return (
+    <div className="pointer-events-none absolute bottom-3 right-3 space-y-1 rounded-md border bg-panel/90 p-2 text-2xs backdrop-blur">
+      <p className="font-medium">{t('legend.title')}</p>
+      {LEGEND[kind].map(([key, color]) => (
+        <p key={key} className="flex items-center gap-1.5 text-muted-foreground"><span className={`h-0.5 w-4 rounded ${color}`} aria-hidden />{t(key)}</p>
+      ))}
     </div>
   );
 }

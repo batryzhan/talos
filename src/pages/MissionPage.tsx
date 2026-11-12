@@ -17,8 +17,15 @@ import { ControlCard } from '@/features/controls/ControlCard';
 import { ExperimentCard } from '@/features/controls/ExperimentCard';
 import { LogCard } from '@/features/log/LogCard';
 import { GamepadPanel } from '@/features/gamepad/GamepadPanel';
+import { CalibrationScenarioCard } from '@/features/calibration/CalibrationScenarioCard';
+import { WheelPanel } from '@/features/calibration/WheelPanel';
 
-const RescueScenarioCard=lazy(()=>import('@/features/rescue/RescueScenarioCard'));
+// Workflow mission briefs load with their mission chunk.
+const FactoryScenarioCard = lazy(() => import('@/features/workflow/FactoryScenarioCard'));
+const WildfireScenarioCard = lazy(() => import('@/features/workflow/WildfireScenarioCard'));
+const MiningScenarioCard = lazy(() => import('@/features/workflow/MiningScenarioCard'));
+
+const WORKFLOW_KIND = { 2: 'factory', 3: 'wildfire', 4: 'mining' } as const;
 
 const HEADER_PX = 44;
 const LEFT_PX = 320;
@@ -27,14 +34,20 @@ const DOCK_PX = 180;
 const DOCK_BAR_PX = 36;
 
 function MissionSidebar({ mission }: { mission: MissionDef }): JSX.Element {
+  const kind = mission.mode >= 2 ? WORKFLOW_KIND[mission.mode as 2 | 3 | 4] : undefined;
   return (
     <ScrollArea className="h-full bg-panel">
       <motion.div
         initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.2, ease: 'easeOut' }}
         className="flex flex-col gap-3 p-3"
       >
-        {mission.mode===5?<Suspense fallback={<Skeleton className="h-48" />}><RescueScenarioCard /></Suspense>:<ScenarioCard mission={mission} />}
-        <ControlCard metamorphic={mission.mode === 4} rescue={mission.mode===5} />
+        {kind ? (
+          <Suspense fallback={<Skeleton className="h-72" />}>
+            {kind === 'factory' ? <FactoryScenarioCard /> : kind === 'wildfire' ? <WildfireScenarioCard /> : <MiningScenarioCard />}
+          </Suspense>
+        ) : mission.mode === 0 ? <CalibrationScenarioCard /> : <ScenarioCard mission={mission} />}
+        {mission.mode === 0 && <WheelPanel />}
+        <ControlCard workflow={kind} />
         <ExperimentCard mode={mission.mode} />
         <LogCard missionId={mission.id} />
       </motion.div>
