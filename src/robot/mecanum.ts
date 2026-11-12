@@ -27,6 +27,18 @@ export function inverseKinematics(t: Twist2D, g: MecanumGeometry): WheelRates {
 
 /** Forward kinematics (pseudo-inverse of formula 14): wheel rates → body twist. */
 export function forwardKinematics(w: WheelRates, g: MecanumGeometry): Twist2D {
+  return forwardKinematicsInto(w, g, { vx: 0, vy: 0, omega: 0 });
+}
+
+/** Inverse kinematics written into `out` (no allocation — for the 100 Hz loop). */
+export function inverseKinematicsInto(t: Twist2D, g: MecanumGeometry, out: WheelRates): WheelRates {
+  const L = g.a + g.b;
+  for (let i = 0; i < 4; i++) out[i] = (t.vx + MECANUM_SIGNS[i][0] * t.vy + MECANUM_SIGNS[i][1] * L * t.omega) / g.r;
+  return out;
+}
+
+/** Forward kinematics written into `out` (no allocation — for the 100 Hz loop). */
+export function forwardKinematicsInto(w: WheelRates, g: MecanumGeometry, out: Twist2D): Twist2D {
   const L = g.a + g.b;
   const k = g.r / 4;
   let vx = 0, vy = 0, om = 0;
@@ -36,7 +48,8 @@ export function forwardKinematics(w: WheelRates, g: MecanumGeometry): Twist2D {
     vy += sy * w[i];
     om += sw * w[i];
   }
-  return { vx: k * vx, vy: k * vy, omega: (k * om) / L };
+  out.vx = k * vx; out.vy = k * vy; out.omega = (k * om) / L;
+  return out;
 }
 
 /**
@@ -50,6 +63,16 @@ export function saturateUniform(w: WheelRates, omegaMax: number): { rates: Wheel
   if (peak <= omegaMax) return { rates: [...w] as WheelRates, alpha: 1 };
   const alpha = omegaMax / peak;
   return { rates: w.map(v => v * alpha) as WheelRates, alpha };
+}
+
+/** Uniform saturation in place; returns α (1 when unsaturated). Equation 2 with s = 1 / α. */
+export function saturateUniformInPlace(w: WheelRates, omegaMax: number): number {
+  let peak = 0;
+  for (let i = 0; i < 4; i++) peak = Math.max(peak, Math.abs(w[i]));
+  if (peak <= omegaMax) return 1;
+  const alpha = omegaMax / peak;
+  for (let i = 0; i < 4; i++) w[i] *= alpha;
+  return alpha;
 }
 
 /** IK followed by uniform saturation. */
@@ -69,6 +92,17 @@ export function slewUniform(current: WheelRates, target: WheelRates, maxDelta: n
 
   const f = maxDelta / peak;
   return current.map((c, i) => c + (target[i] - c) * f) as WheelRates;
+}
+
+/** `slewUniform` written into `out` (may alias `current`; no allocation). */
+export function slewUniformInto(current: WheelRates, target: WheelRates, maxDelta: number, out: WheelRates): WheelRates {
+  let peak = 0;
+  for (let i = 0; i < 4; i++) peak = Math.max(peak, Math.abs(target[i] - current[i]));
+  if (peak <= Math.max(0, maxDelta)) { for (let i = 0; i < 4; i++) out[i] = target[i]; return out; }
+  if (!(maxDelta > 0)) { for (let i = 0; i < 4; i++) out[i] = current[i]; return out; }
+  const f = maxDelta / peak;
+  for (let i = 0; i < 4; i++) out[i] = current[i] + (target[i] - current[i]) * f;
+  return out;
 }
 
 /** World-frame vector → body frame of a robot with heading θ (rotation by −θ). */

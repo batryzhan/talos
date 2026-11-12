@@ -17,31 +17,36 @@ export function SceneSetup({ mission }: { mission: MissionDef }): JSX.Element {
   const palette = scenePalette(theme);
 
   useLayoutEffect(() => {
-    scene.background = mission.mode===5?new Color(0xa7aaa0):palette.viewport;
-    scene.fog = new Fog(mission.mode===5?new Color(0xa7aaa0):palette.viewport, mission.fog[0], mission.fog[1]);
+    const sky = mission.sky === undefined ? palette.viewport : new Color(mission.sky);
+    scene.background = sky;
+    scene.fog = new Fog(sky, mission.fog[0], mission.fog[1]);
     return () => { scene.fog = null; scene.background = null; };
-  }, [scene, palette, mission.fog]);
+  }, [scene, palette, mission.fog, mission.sky]);
+  const e = mission.shadowExtent;
 
   return (
     <>
       <SoftShadows size={18} samples={10} focus={0.4} />
       <directionalLight
         castShadow
-        position={mission.mode===5?[35,-60,38]:[10,-18,32]}
+        position={[...mission.sunPosition]}
         intensity={mission.sun}
         color="#ffe9cf"
         shadow-mapSize={[2048, 2048]}
         shadow-bias={-0.00015}
         shadow-normalBias={0.025}
       >
-        <orthographicCamera attach="shadow-camera" args={mission.mode===5?[-85,85,85,-85,1,220]:[-25,25,25,-25,1,85]} />
+        <orthographicCamera attach="shadow-camera" args={[-e, e, e, -e, 1, e * 3.4]} />
       </directionalLight>
       <hemisphereLight args={['#c4d2df', '#49443d', mission.hemisphere * 0.7]} />
-      {mission.mode===5?<StudioEnvironment />:<EnvironmentBoundary fallback={<StudioEnvironment />}>
-        <Suspense fallback={<StudioEnvironment />}>
-          <Environment preset="warehouse" environmentIntensity={0.35} environmentRotation={Z_UP} />
-        </Suspense>
-      </EnvironmentBoundary>}
+      {mission.ibl === 'studio' && <StudioEnvironment />}
+      {mission.ibl === 'warehouse' && (
+        <EnvironmentBoundary fallback={<StudioEnvironment />}>
+          <Suspense fallback={<StudioEnvironment />}>
+            <Environment preset="warehouse" environmentIntensity={0.35} environmentRotation={Z_UP} />
+          </Suspense>
+        </EnvironmentBoundary>
+      )}
     </>
   );
 }

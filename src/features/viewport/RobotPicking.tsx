@@ -5,7 +5,7 @@ import { Matrix4, type Group, type InstancedMesh, type Mesh } from 'three';
 import type { Engine } from '@/platform/Engine';
 import { useUiStore } from '@/store/ui';
 import { scenePalette } from './palette';
-import { readRobotPose, robotCount, robotIdAt, robotIndexOf, type MutablePose } from './robots';
+import { readRobotPose, robotCount, robotIdAt, robotIndexOf, type MutablePoseZ } from './robots';
 import { RobotTooltip } from './RobotTooltip';
 
 /**
@@ -21,7 +21,7 @@ export function RobotPicking({ engine }: { engine: Engine }): JSX.Element {
   const hovered = useUiStore(s => s.hovered);
   const theme = useUiStore(s => s.theme);
   const palette = scenePalette(theme);
-  const scratch = useMemo(() => ({ m: new Matrix4(), pose: { x: 0, y: 0, theta: 0 } as MutablePose }), []);
+  const scratch = useMemo(() => ({ m: new Matrix4(), pose: { x: 0, y: 0, theta: 0, z: 0 } as MutablePoseZ }), []);
 
   useFrame(() => {
     const mesh = hits.current;
@@ -30,7 +30,7 @@ export function RobotPicking({ engine }: { engine: Engine }): JSX.Element {
     for (let i = 0; i < count; i++) {
       if (!readRobotPose(engine, i, pose)) continue;
       m.makeRotationZ(pose.theta);
-      m.setPosition(pose.x, pose.y, (engine.rescue?.map.heightAt(pose.x,pose.y)??0)+0.2);
+      m.setPosition(pose.x, pose.y, pose.z + 0.2);
       mesh.setMatrixAt(i, m);
     }
     mesh.instanceMatrix.needsUpdate = true;
@@ -40,7 +40,7 @@ export function RobotPicking({ engine }: { engine: Engine }): JSX.Element {
     placeRing(hoverRing.current, st.hovered !== null && !(st.selection?.kind === 'agent' && st.selection.id === st.hovered) ? st.hovered : null);
     placeRing(selectRing.current, st.selection?.kind === 'agent' ? st.selection.id : null);
     if (tooltip.current && st.hovered !== null && readRobotPose(engine, robotIndexOf(engine, st.hovered), pose)) {
-      tooltip.current.position.set(pose.x, pose.y, (engine.rescue?.map.heightAt(pose.x,pose.y)??0)+0.62);
+      tooltip.current.position.set(pose.x, pose.y, pose.z + 0.62);
     }
   });
 
@@ -48,7 +48,7 @@ export function RobotPicking({ engine }: { engine: Engine }): JSX.Element {
     if (!ring) return;
     const ok = id !== null && readRobotPose(engine, robotIndexOf(engine, id), scratch.pose);
     ring.visible = ok;
-    if (ok) ring.position.set(scratch.pose.x, scratch.pose.y, (engine.rescue?.map.heightAt(scratch.pose.x,scratch.pose.y)??0)+0.006);
+    if (ok) ring.position.set(scratch.pose.x, scratch.pose.y, scratch.pose.z + 0.006);
   }
 
   const idOf = (e: ThreeEvent<PointerEvent | MouseEvent>): number | null =>

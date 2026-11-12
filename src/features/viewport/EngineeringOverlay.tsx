@@ -29,8 +29,8 @@ const HIDDEN = new Matrix4().makeScale(0, 0, 0);
  * CAD-style engineering layer (drawn on top of the scene, like a GIS layer):
  *  - support polygon (translucent fill + outline; green when stable, red when ρ < 0) and CoM → nearest edge;
  *  - support reaction vectors with arrowheads (info → amber above 80 % of F_allow → red above F_allow);
- *  - ring radio links whose brightness tracks packet freshness, with packets travelling along them;
- *  - docking link in the factory (green once mated).
+ *  - ring radio links whose brightness tracks packet freshness, with packets travelling along them.
+ * Workflow missions draw their own overlay (S1 graph, routes, radio) inside their scene.
  * Everything is pooled; the frame loop only writes into preallocated buffers.
  */
 export function EngineeringOverlay({ engine }: { engine: Engine }): JSX.Element {
@@ -122,18 +122,9 @@ function rebuild(
 ): void {
   let li = 0, mi = 0, vi = 0, pi = 0;
   const { dummy, color } = res;
-  const marker = (x: number, y: number, z: number, r: number, c: Color): void => {
-    if (!markers || mi >= MARKERS) return;
-    dummy.position.set(x, y, z);
-    dummy.scale.setScalar(r);
-    dummy.rotation.set(0, 0, 0);
-    dummy.updateMatrix();
-    markers.setMatrixAt(mi, dummy.matrix);
-    markers.setColorAt(mi, c);
-    mi++;
-  };
+  const marker = (x: number, y: number, z: number, r: number, c: Color): void => { mi = placeMarker(markers, dummy, mi, x, y, z, r, c); };
 
-  if (e.ready && !e.metamorphic) {
+  if (e.ready && !e.workflow) {
     for (let k = 0; k < e.loads.length && k < MAX_LOADS; k++) {
       const load = e.loads[k], mgr = e.fleet.team(load.spec.teamId);
       const fill = fills[k];
@@ -165,7 +156,8 @@ function rebuild(
       if (n >= 3 && li < LINES) lines?.set(li++, com.x, com.y, 0.02, d.nearest.x, d.nearest.y, 0.02, pal.warning);
 
       // Ring radio links: brightness = packet freshness; HOLD turns the ring red.
-      const holding = mgr.agents.some(a => a.mode === 'HOLD');
+      let holding = false;
+      for (const a of mgr.agents) if (a.mode === 'HOLD') { holding = true; break; }
       for (const [a, b] of mgr.edges) {
         if (li >= LINES) break;
         const u = e.fleet.agent(a)?.pose, v = e.fleet.agent(b)?.pose;
@@ -201,16 +193,10 @@ function rebuild(
       vi++;
     }
 
-    // Factory docking link.
-    if (e.mode === 2 && e.loads.length > 1 && li < LINES) {
-      const a = e.loads[0].physics.state, b = e.loads[1].physics.state;
-      const mated = e.fleet.dockingTelemetry()[0]?.phase === 'MATED';
-      lines?.set(li++, a.pose.x, a.pose.y, a.z + 0.25, b.pose.x, b.pose.y, b.z + 0.25, mated ? pal.success : pal.warning);
-    }
   }
 
   // Collapse unused pool entries.
-  for (let k = e.metamorphic ? 0 : Math.min(e.loads.length, MAX_LOADS); k < MAX_LOADS; k++) { const f = fills[k]; if (f) f.visible = false; }
+  for (let k = Math.min(e.loads.length, MAX_LOADS); k < MAX_LOADS; k++) { const f = fills[k]; if (f) f.visible = false; }
   lines?.commit(li);
   vectors?.commit(vi);
   for (let i = vi; i < VECTORS; i++) arrows?.setMatrixAt(i, HIDDEN);
@@ -224,6 +210,17 @@ function rebuild(
     if (arrows.instanceColor) arrows.instanceColor.needsUpdate = true;
   }
   res.packetCount = pi;
+}
+
+function placeMarker(markers: InstancedMesh | null, dummy: Object3D, mi: number, x: number, y: number, z: number, r: number, c: Color): number {
+  if (!markers || mi >= MARKERS) return mi;
+  dummy.position.set(x, y, z);
+  dummy.scale.setScalar(r);
+  dummy.rotation.set(0, 0, 0);
+  dummy.updateMatrix();
+  markers.setMatrixAt(mi, dummy.matrix);
+  markers.setColorAt(mi, c);
+  return mi + 1;
 }
 
 /** Packets glide along fresh links every frame (cheap: a few matrix writes). */

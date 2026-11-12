@@ -1,33 +1,10 @@
-import type { RescueSnapshot } from '@/missions/SearchRescueSim';
 import { create } from 'zustand';
 import type { Engine, EngineEvent, EnginePhase } from '@/platform/Engine';
 import type { FleetRow } from '@/features/telemetry/rows';
-import type { LatchStatus, StressLevel } from '@/types/metamorphic';
-import type { BridgeStatus } from '@/types/metamorphic';
+import type { WorkflowSnapshot } from '@/missions/workflow/types';
+import type { CalibrationSnapshot } from '@/core/calibration/snapshot';
 
 export interface TeamSnapshot { id: string; phase: string | null; robots: number }
-
-export interface MacroChassisRow { id: number; role: 'worker' | 'reserve'; latch: LatchStatus; power: number }
-
-export interface MacroSnapshot {
-  locked: boolean;
-  lockedCount: number;
-  required: number;
-  assembling: boolean;
-  totalCurrent: number;
-  residual: number;
-  residualTrend: readonly number[];
-  saturation: number;
-  peakStress: number;
-  stress: StressLevel;
-  routeStatus: string;
-  routeCost: number;
-  bridgeStatus: BridgeStatus;
-  quorum: 'STABLE' | 'DEGRADED' | 'LOST';
-  delivery: number;
-  epoch: number;
-  chassis: MacroChassisRow[];
-}
 
 /** Throttled (4 Hz) copy of everything the React panels show. */
 export interface SimSnapshot {
@@ -43,13 +20,15 @@ export interface SimSnapshot {
   /** Newest first. */
   events: EngineEvent[];
   logCount: number;
-  macro: MacroSnapshot | null;
-  rescue?: RescueSnapshot;
+  /** Workflow missions (factory, wildfire, mine): rows, KPIs and live auction / consensus state. */
+  workflow: WorkflowSnapshot | null;
+  /** Chassis calibration (mode 0): wheels, equations 1, 2, 7 and test results. */
+  calibration: CalibrationSnapshot | null;
 }
 
 export const EMPTY_SNAPSHOT: SimSnapshot = {
   phase: 'loading', progress: 0, error: null, time: 0, holding: false, fps: 60, frameMs: 16.7,
-  rows: [], teams: [], events: [], logCount: 0, macro: null,
+  rows: [], teams: [], events: [], logCount: 0, workflow: null, calibration: null,
 };
 
 interface SimStore { engine: Engine | null; snap: SimSnapshot }

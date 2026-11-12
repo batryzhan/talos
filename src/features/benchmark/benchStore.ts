@@ -1,8 +1,9 @@
 import { create } from 'zustand';
 import { RUNS, configKey, runConfig, runSeries, type M0Row, type SeriesResult } from './m0Series';
 import { physicalBenchmark, type PhysicalResult } from './physical';
+import { runS1Series, type S1Summary } from '@/core/routing/s1Experiment';
 
-export type BenchJob = 'series' | 'custom' | 'physical';
+export type BenchJob = 'series' | 'custom' | 'physical' | 's1';
 
 interface BenchState {
   /** N shown on the chart and used for a custom run. */
@@ -17,6 +18,9 @@ interface BenchState {
   physicalSeed: number;
   physical: PhysicalResult[] | null;
   error: string | null;
+  /** Experiment S1: 150 edge-closure scenarios. */
+  s1: S1Summary | null;
+  s1Progress: { done: number; total: number } | null;
 
   setN: (n: 2 | 4 | 8) => void;
   setP: (p: number) => void;
@@ -26,6 +30,7 @@ interface BenchState {
   runSeries: () => Promise<void>;
   runCustom: () => Promise<void>;
   runPhysical: () => Promise<void>;
+  runS1: () => Promise<void>;
 }
 
 /** Benchmark lab state; results survive navigating away and back. */
@@ -41,6 +46,8 @@ export const useBenchStore = create<BenchState>()((set, get) => ({
   physicalSeed: 0,
   physical: null,
   error: null,
+  s1: null,
+  s1Progress: null,
 
   setN: n => set({ n }),
   setP: p => set({ p }),
@@ -74,6 +81,18 @@ export const useBenchStore = create<BenchState>()((set, get) => ({
       set({ error: e instanceof Error ? e.message : String(e) });
     } finally {
       set({ running: null, progress: null });
+    }
+  },
+
+  runS1: async () => {
+    if (get().running) return;
+    set({ running: 's1', error: null, s1Progress: { done: 0, total: 1 } });
+    try {
+      set({ s1: await runS1Series((done, total) => set({ s1Progress: { done, total } })) });
+    } catch (e) {
+      set({ error: e instanceof Error ? e.message : String(e) });
+    } finally {
+      set({ running: null, s1Progress: null });
     }
   },
 

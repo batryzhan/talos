@@ -1,11 +1,19 @@
 import type { Vec2, SupportContactInput, SupportContactOutput, PayloadState } from '../contracts/types';
 export const G = 9.81;
 const cross = (a:Vec2,b:Vec2,c:Vec2)=>(b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);
+const byXY=(a:Vec2,b:Vec2)=>a.x-b.x||a.y-b.y;
+/** Monotone-chain hull (counter-clockwise); duplicate points collapse. One output array, no string keys. */
 export function convexHull(points:Vec2[]):Vec2[] {
- const p=[...new Map(points.map(p=>[`${p.x},${p.y}`,p])).values()].sort((a,b)=>a.x-b.x||a.y-b.y);
- if(p.length<3)return p;
- const half=(a:Vec2[])=>{const h:Vec2[]=[];for(const v of a){while(h.length>1&&cross(h[h.length-2],h[h.length-1],v)<=0)h.pop();h.push(v);}return h.slice(0,-1);};
- return [...half(p),...half([...p].reverse())];
+ const sorted=points.slice().sort(byXY);let n=0;
+ for(let i=0;i<sorted.length;i++)if(n===0||sorted[i].x!==sorted[n-1].x||sorted[i].y!==sorted[n-1].y)sorted[n++]=sorted[i];
+ sorted.length=n;
+ if(n<3)return sorted;
+ const h:Vec2[]=[];
+ for(let i=0;i<n;i++){const v=sorted[i];while(h.length>1&&cross(h[h.length-2],h[h.length-1],v)<=0)h.pop();h.push(v);}
+ h.pop();const lower=h.length;
+ for(let i=n-1;i>=0;i--){const v=sorted[i];while(h.length>lower+1&&cross(h[h.length-2],h[h.length-1],v)<=0)h.pop();h.push(v);}
+ h.pop();
+ return h;
 }
 export function stability(points:Vec2[],com:Vec2){
  const hull=convexHull(points);let distance=Infinity,nearest={...com},inside=hull.length>=3;
@@ -45,13 +53,23 @@ export function equilibrium(inputs:SupportContactInput[],mass:number,com:Vec2){
 }
 export class PayloadPhysics {
  velocity=0; rollVelocity=0; pitchVelocity=0; roll=0; pitch=0;
+ /** Contact outputs reused by every step (the substep loop runs 40× per 10 ms: no allocation there). */
+ private readonly out:SupportContactOutput[]=[];
  constructor(public state:PayloadState,public size={x:2,y:1}){}
  step(dt:number,inputs:SupportContactInput[]){
  // Small substeps resolve stiff contacts without explicit-Euler instability.
- const n=Math.ceil(dt/0.00025),h=dt/n;let contacts:SupportContactOutput[]=[];
+ const n=Math.ceil(dt/0.00025),h=dt/n,contacts=this.out;
+ while(contacts.length<inputs.length)contacts.push({agentId:0,delta:0,deltaDot:0,force:0});
+ contacts.length=inputs.length;
+ const com=this.state.com;
  for(let k=0;k<n;k++){
- contacts=inputs.map(s=>{const x=s.pad.x-this.state.com.x,y=s.pad.y-this.state.com.y;return contact(s,this.state.z+this.pitch*x+this.roll*y,this.velocity+this.pitchVelocity*x+this.rollVelocity*y);});
- let f=0,tx=0,ty=0;contacts.forEach((c,i)=>{f+=c.force;tx+=c.force*(inputs[i].pad.y-this.state.com.y);ty+=c.force*(inputs[i].pad.x-this.state.com.x);});
+ let f=0,tx=0,ty=0;
+ for(let i=0;i<inputs.length;i++){
+  const s=inputs[i],x=s.pad.x-com.x,y=s.pad.y-com.y,c=contacts[i];
+  const delta=s.padZ-(this.state.z+this.pitch*x+this.roll*y),deltaDot=s.padVel-(this.velocity+this.pitchVelocity*x+this.rollVelocity*y);
+  c.agentId=s.agentId;c.delta=delta;c.deltaDot=deltaDot;c.force=delta>0?Math.max(0,s.stiffness*delta+s.damping*deltaDot):0;
+  f+=c.force;tx+=c.force*y;ty+=c.force*x;
+ }
  this.velocity+=(f/this.state.mass-G)*h;this.state.z+=this.velocity*h;
  this.rollVelocity+=tx/(this.state.mass*this.size.y**2/12)*h;this.pitchVelocity+=ty/(this.state.mass*this.size.x**2/12)*h;
  this.roll+=this.rollVelocity*h;this.pitch+=this.pitchVelocity*h;

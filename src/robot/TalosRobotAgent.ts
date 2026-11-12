@@ -22,7 +22,7 @@ import type {
   SupportContactInput, SupportContactOutput, Twist2D, WheelId, WheelRates, TerrainMotion,
 } from '../contracts/types';
 import { WHEEL_ORDER } from '../contracts/types';
-import { forwardKinematics, saturateUniform, slewUniform, twistToWheelRates, MECANUM_SIGNS } from './mecanum';
+import { forwardKinematicsInto, inverseKinematicsInto, saturateUniformInPlace, slewUniformInto, MECANUM_SIGNS } from './mecanum';
 import { DEFAULT_LIFT_PARAMS, createLiftState, stepLift, type LiftState } from './liftDrive';
 import { PAD_BASE_Z, PAD_HALF_EXTENTS, PAD_HALF_SIZE, ViperSlideRig } from './ViperSlideRig';
 import { TalosChassis, dressStraferModel } from './TalosChassis';
@@ -93,6 +93,7 @@ interface WheelRig {
 }
 
 const ROLLER_RADIUS = MECANUM_140.roller.rMax;
+const ZERO_RATES: WheelRates = [0, 0, 0, 0];
 
 /** Load the Strafer .glb once; pass `gltf.scene` as `model` to each agent. */
 export function loadStraferModel(url = '/robot.glb', onProgress?: (loaded: number, total: number) => void): Promise<THREE.Group> {
@@ -124,8 +125,12 @@ export class TalosRobotAgent {
   /** Measured body twist (from wheel odometry). */
   readonly twist: Twist2D = { vx: 0, vy: 0, omega: 0 };
   /** Actual wheel rates (rad/s) after slew limiting, FL FR RL RR. */
-  wheelRates: WheelRates = [0, 0, 0, 0];
-  private wheelTarget: WheelRates = [0, 0, 0, 0];
+  readonly wheelRates: WheelRates = [0, 0, 0, 0];
+  private readonly wheelTarget: WheelRates = [0, 0, 0, 0];
+  /** Scratch twist of the forward kinematics (reused every step). */
+  private readonly odom: Twist2D = { vx: 0, vy: 0, omega: 0 };
+  /** Scratch lift input (reused every step). */
+  private readonly liftInput = { u: 0, loadForce: 0, lock: false, fault: false };
   /** α applied by the last uniform saturation (1 = unsaturated). */
   saturationAlpha = 1;
   readonly lift: LiftState;
@@ -214,16 +219,14 @@ export class TalosRobotAgent {
 
   /** Body-frame twist command → formula 14 + uniform saturation. `limitScale` scales ω_max (e.g. Shift slow mode). */
   setTwistCommand(t: Twist2D, limitScale = 1): void {
-    const { rates, alpha } = twistToWheelRates(t, this.geometry, this.geometry.omegaMax * limitScale);
-    this.wheelTarget = rates;
-    this.saturationAlpha = alpha;
+    inverseKinematicsInto(t, this.geometry, this.wheelTarget);
+    this.saturationAlpha = saturateUniformInPlace(this.wheelTarget, this.geometry.omegaMax * limitScale);
   }
 
   /** Wheel rate targets from the swarm. Re-saturated uniformly as a safety net. */
   setWheelRates(w: WheelRates): void {
-    const { rates, alpha } = saturateUniform(w, this.geometry.omegaMax);
-    this.wheelTarget = rates;
-    this.saturationAlpha = alpha;
+    for (let i = 0; i < 4; i++) this.wheelTarget[i] = w[i];
+    this.saturationAlpha = saturateUniformInPlace(this.wheelTarget, this.geometry.omegaMax);
   }
 
   setLiftCommand(u: number, lock = false): void {
@@ -236,14 +239,14 @@ export class TalosRobotAgent {
     if (mode === this.mode) return;
     this.mode = mode;
     if (mode === 'HOLD') this.hold();
-    if (mode === 'LIFT') this.wheelTarget = [0, 0, 0, 0]; // chassis locked during pure lift
+    if (mode === 'LIFT') this.wheelTarget.fill(0); // chassis locked during pure lift
     this.slide?.setStatusColor(MODE_COLORS[mode]);
     this.chassis?.setStatusColor(MODE_COLORS[mode]);
   }
 
   /** Safe hold: zero chassis, engage lift position lock at the current height. */
   hold(): void {
-    this.wheelTarget = [0, 0, 0, 0];
+    this.wheelTarget.fill(0);
     this.liftCmd = 0;
     this.liftLockCmd = true;
   }
@@ -255,8 +258,8 @@ export class TalosRobotAgent {
   reset(pose: Partial<Pose2D> = {}): void {
     Object.assign(this.pose, { x: 0, y: 0, theta: 0 }, pose);
     Object.assign(this.twist, { vx: 0, vy: 0, omega: 0 });
-    this.wheelRates = [0, 0, 0, 0];
-    this.wheelTarget = [0, 0, 0, 0];
+    this.wheelRates.fill(0);
+    this.wheelTarget.fill(0);
     Object.assign(this.lift, createLiftState(this.liftParams.hMin));
     this.liftCmd = 0;
     this.liftLockCmd = false;
@@ -277,10 +280,10 @@ export class TalosRobotAgent {
     const g = this.geometry;
     const holding = this.mode === 'HOLD';
     const wheelsLocked = holding || this.mode === 'LIFT';
-    const target: WheelRates = wheelsLocked ? [0, 0, 0, 0] : this.wheelTarget;
+    const target: WheelRates = wheelsLocked ? ZERO_RATES : this.wheelTarget;
 
-    this.wheelRates = slewUniform(this.wheelRates, target, g.alphaMax * dt);
-    const tw = forwardKinematics(this.wheelRates, g);
+    slewUniformInto(this.wheelRates, target, g.alphaMax * dt, this.wheelRates);
+    const tw = forwardKinematicsInto(this.wheelRates, g, this.odom);
     const terrain = this.terrain, field = terrain?.field;
     const grad = field?.gradientAt(this.pose.x, this.pose.y);
     const wx = tw.vx*Math.cos(this.pose.theta)-tw.vy*Math.sin(this.pose.theta);
@@ -300,7 +303,9 @@ export class TalosRobotAgent {
 
     // lift
     const load = this.contact ? Math.max(0, this.contact.force) : 0;
-    stepLift(this.lift, this.liftParams, { u: this.liftCmd, loadForce: load, lock: holding || this.liftLockCmd, fault: this.liftFault }, dt);
+    const li = this.liftInput;
+    li.u = this.liftCmd; li.loadForce = load; li.lock = holding || this.liftLockCmd; li.fault = this.liftFault;
+    stepLift(this.lift, this.liftParams, li, dt);
 
     // battery: chassis motors (4 × free current + load-proportional) + lift
     let iDrive = 0;

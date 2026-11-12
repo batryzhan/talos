@@ -1,5 +1,5 @@
 import { useId, useState } from 'react';
-import { ArrowUpFromLine, Link2Off, OctagonX, Pause, Play, RotateCcw, SlidersHorizontal } from 'lucide-react';
+import { ArrowUpFromLine, OctagonX, Pause, Play, RotateCcw, SlidersHorizontal } from 'lucide-react';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
@@ -13,13 +13,15 @@ import { useT, type MessageKey } from '@/i18n';
 import { useUiStore } from '@/store/ui';
 import { useSim, useSimStore } from '@/features/sim/simStore';
 import { parseSeed, type SeedError } from './seed';
+import type { WorkflowSnapshot } from '@/missions/workflow/types';
+import { WorkflowActions } from '@/features/workflow/WorkflowActions';
 
 const SEED_ERRORS: Record<SeedError, MessageKey> = {
   empty: 'controls.seedError.empty', integer: 'controls.seedError.integer', range: 'controls.seedError.range',
 };
 
-/** Seed + restart, lift / assemble, emergency stop (confirmed), pause. */
-export function ControlCard({ metamorphic, rescue=false }: { metamorphic: boolean;rescue?:boolean }): JSX.Element {
+/** Seed + restart, lift (lift-team missions) or mission actions (workflow missions), emergency stop (confirmed), pause. */
+export function ControlCard({ workflow }: { workflow?: WorkflowSnapshot['kind'] }): JSX.Element {
   const t = useT();
   const seed = useUiStore(s => s.seed);
   const paused = useUiStore(s => s.paused);
@@ -58,38 +60,43 @@ export function ControlCard({ metamorphic, rescue=false }: { metamorphic: boolea
           </Button>
         </form>
 
+        {workflow && <WorkflowActions kind={workflow} />}
+
         <div className="flex gap-2">
-          <Hint label={t(rescue?'controls.deploy.hint':metamorphic ? 'controls.assemble.hint' : 'controls.lift.hint')}>
-            <Button variant="default" className="flex-1" disabled={!ready} onClick={() => engine()?.lift()}>
-              <ArrowUpFromLine />
-              {t(rescue?'controls.deploy':metamorphic ? 'controls.assemble' : 'controls.lift')}
-            </Button>
-          </Hint>
+          {!workflow && (
+            <Hint label={t('controls.lift.hint')}>
+              <Button variant="default" className="flex-1" disabled={!ready} onClick={() => engine()?.lift()}>
+                <ArrowUpFromLine />
+                {t('controls.lift')}
+              </Button>
+            </Hint>
+          )}
           <Hint label={paused ? t('controls.resume') : t('controls.pause')}>
-            <Button variant="outline" size="icon" disabled={!ready} onClick={() => setPaused(!paused)} aria-pressed={paused} aria-label={paused ? t('controls.resume') : t('controls.pause')}>
+            <Button variant="outline" size={workflow ? 'default' : 'icon'} className={workflow ? 'flex-1' : undefined} disabled={!ready} onClick={() => setPaused(!paused)} aria-pressed={paused} aria-label={paused ? t('controls.resume') : t('controls.pause')}>
               {paused ? <Play /> : <Pause />}
+              {workflow && (paused ? t('controls.resume') : t('controls.pause'))}
             </Button>
           </Hint>
         </div>
 
         <AlertDialog>
-          <Hint label={t(metamorphic ? 'controls.release.hint' : 'controls.hold.hint')}>
+          <Hint label={t('controls.hold.hint')}>
             <AlertDialogTrigger asChild>
-              <Button variant={metamorphic ? 'outline' : 'destructive'} className="w-full" disabled={!ready}>
-                {metamorphic ? <Link2Off /> : <OctagonX />}
-                {t(metamorphic ? 'controls.release' : 'controls.hold')}
+              <Button variant="destructive" className="w-full" disabled={!ready}>
+                <OctagonX />
+                {t('controls.hold')}
               </Button>
             </AlertDialogTrigger>
           </Hint>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>{t(metamorphic ? 'controls.release.title' : 'controls.hold.title')}</AlertDialogTitle>
-              <AlertDialogDescription>{t(metamorphic ? 'controls.release.body' : 'controls.hold.body')}</AlertDialogDescription>
+              <AlertDialogTitle>{t('controls.hold.title')}</AlertDialogTitle>
+              <AlertDialogDescription>{t('controls.hold.body')}</AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
               <AlertDialogAction variant="destructive" onClick={() => engine()?.hold()}>
-                {t(metamorphic ? 'controls.release.confirm' : 'controls.hold.confirm')}
+                {t('controls.hold.confirm')}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>

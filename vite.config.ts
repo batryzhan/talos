@@ -17,8 +17,9 @@ function manualChunks(id:string):string|undefined{
  if(/node_modules\/(@react-three\/drei|camera-controls|maath|three-mesh-bvh|troika-|webgl-sdf-generator|bidi-js|@monogrid|stats-gl|@react-spring|tunnel-rat|meshline|detect-gpu|hls\.js|@mediapipe)/.test(id))return 'r3f-drei';
  if(/node_modules\/(recharts|d3-|victory-vendor|recharts-scale|decimal\.js-light|internmap|lodash)/.test(id))return 'charts';
  if(/node_modules\/(react|react-dom|scheduler|react-router|react-router-dom|@remix-run)\//.test(id))return 'react';
- if(/src\/(missions\/SearchRescueSim|platform\/WildernessEnvironment|core\/terrain)\b/.test(id))return 'rescue';
- if(/src\/(swarm|robot|physics|missions)\//.test(id))return 'simulation';
+ // Workflow missions (factory / wildfire / mine) split by their dynamic imports; shared workflow core stays together.
+ if(/src\/(core\/(agents|allocation|coordination|routing|consensus|terrain)|missions\/workflow|platform\/(fleet|fx)|platform\/labels)\//.test(id)||/src\/platform\/labels\.ts/.test(id))return 'workflow-core';
+ if(/src\/(swarm|robot|physics)\//.test(id)||/src\/missions\/(HeavyConstructionSim|cases)\.ts/.test(id))return 'simulation';
  return undefined;
 }
 

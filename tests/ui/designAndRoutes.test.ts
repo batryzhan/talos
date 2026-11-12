@@ -29,21 +29,27 @@ describe('design tokens', () => {
 });
 
 describe('routes', () => {
-  it('redirects historic ?mode=N links to readable routes', () => {
+  it('redirects ?mode=0..4 to the five missions and the historic ?mode=5 to /rescue', () => {
     expect(legacyModeRoute('?mode=0')).toBe('/calibration');
     expect(legacyModeRoute('?mode=1')).toBe('/construction');
     expect(legacyModeRoute('?mode=2')).toBe('/factory');
-    expect(legacyModeRoute('?mode=3')).toBe('/benchmark');
-    expect(legacyModeRoute('?mode=4')).toBe('/metamorphic');
+    expect(legacyModeRoute('?mode=3')).toBe('/rescue');
+    expect(legacyModeRoute('?mode=4')).toBe('/mining');
     expect(legacyModeRoute('?mode=5')).toBe('/rescue');
+    expect(legacyModeRoute('?mode=6')).toBeNull();
     expect(legacyModeRoute('?mode=9')).toBeNull();
     expect(legacyModeRoute('?mode=x')).toBeNull();
     expect(legacyModeRoute('')).toBeNull();
   });
 
   it('has one nav tab per mode with a unique path', () => {
-    expect(NAV_ITEMS.map(i => i.path)).toEqual(['/calibration', '/construction', '/factory', '/metamorphic', '/rescue', '/benchmark']);
-    expect(new Set(MISSIONS.map(m => m.mode)).size).toBe(MISSIONS.length);
+    expect(NAV_ITEMS.map(i => i.path)).toEqual(['/calibration', '/construction', '/factory', '/rescue', '/mining', '/benchmark']);
+    expect(MISSIONS.map(m => m.mode)).toEqual([0, 1, 2, 3, 4]);
+  });
+
+  it('has no metamorphic route, label or translation left', () => {
+    expect(NAV_ITEMS.some(i => i.path.includes('metamorph'))).toBe(false);
+    for (const dict of [ru, en]) for (const [k, v] of Object.entries(dict)) { expect(k).not.toMatch(/metamorph|^macro\./i); expect(v).not.toMatch(/метаморф|metamorph/i); }
   });
 });
 

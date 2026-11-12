@@ -47,16 +47,3 @@ export function buildConstruction(){
  e.box(17,-5,.6,2.5,7,.35,e.steel);e.box(17,-9,.2,2.5,2,2.3,e.white);for(const x of [15.6,18.4])for(const y of [-7,-3])e.rod([x,y,.45],[x+.18,y,.45],.45,e.dark);
  return e.finish();
 }
-export function buildFactory(){
- const e=new IndustrialEnvironment();e.box(0,2,-.2,32,30,.2,e.concrete);
- for(const x of [-14,14])for(let y=-10;y<=14;y+=6){e.box(x,y,0,.35,.45,9);e.box(x,y,0,.8,.9,.25,e.concrete);e.rod([x,y,8.6],[-x,y,8.6],.1);for(let a=-14;a<14;a+=2)e.rod([a,y,8.6],[a+2,y,9.5],.045);e.rod([-14,y,9.5],[14,y,9.5],.08);}
- for(const x of [-13.7,13.7]){e.box(x,2,7.4,.45,28,.55);e.box(x,2,8,.12,28,.12,e.dark);}
- for(const y of [3,12]){for(const dy of [-.5,.5])e.box(0,y+dy,8.1,28,.22,.6,e.yellow);for(let x=-13;x<14;x+=1.5)e.rod([x,y-.5,8.1],[x+1.5,y+.5,8.6],.05,e.yellow);e.box(4,y,7.5,1.6,1.5,.65,e.dark);e.rod([4,y,7.5],[4,y,3],.022,e.dark);}
- for(const x of [-11,-5,2,9]){e.box(x,12,0,4,3,3.7,e.dark);e.box(x,10.46,.8,2,.08,1.8,e.red);for(const dx of [-1,1])e.rod([x+dx,12,3.7],[x+dx,12,6.8],.28);e.rod([x-1,12,6.8],[x+1,12,6.8],.28);e.box(x,9.5,0,.8,.6,1.4,e.steel);}
- for(const x of [-12,12]){e.rod([x,6,0],[x,6,4],1,e.steel);e.rod([x,6,4],[x,6,6],.35);e.rod([x,6,6],[x,14,6],.35);}
- e.box(0,9,3.8,27,1.2,.15);e.rail(-13,8.4,3.95,26);e.rail(-13,9.6,3.95,26);for(let x=-12;x<=12;x+=4)e.box(x,9,0,.12,.12,3.8);for(let i=0;i<16;i++)e.box(13,8-i*.22,i*.24,.9,.24,.08);e.rod([12.5,4.5,1],[12.5,8,4.9],.03,e.yellow);
- for(const x of [-9,10]){e.box(x,0,.003,.08,20,.008,e.yellow);for(let y=-10;y<10;y+=.5)e.box(x+.3,y,.003,.45,.22,.008,e.dark);}
- for(let i=0;i<4;i++){const x=-7+i*4;e.box(x,8,.002,2,2,.01,e.yellow);e.box(x,8,.015,1.8,1.8,.012,e.dark);e.box(x,9,0,.8,.25,1,e.steel);}
- for(const x of [-7,-5,-3]){e.box(x,-6,.003,1.4,1.5,.012,e.yellow);e.box(x,-6,.016,1.25,1.35,.012,e.dark);e.box(x,-6.7,0,.8,.25,1.2);}
- const root=e.finish();for(const x of [-8,0,8])for(const y of [-5,4,12]){const light=new T.SpotLight(0xffe9cb,65,18,.85,.65,1.5);light.position.set(x,y,8.4);light.target.position.set(x,y,0);root.add(light,light.target);const lamp=new T.Mesh(new T.CylinderGeometry(.28,.4,.15,12),new T.MeshStandardMaterial({color:0xddd5be,emissive:0xffe2ac,emissiveIntensity:.6}));lamp.rotation.x=Math.PI/2;lamp.position.copy(light.position);root.add(lamp);}const furnace=new T.PointLight(0xf09b52,12,9,2);furnace.position.set(-5,10,1.6);root.add(furnace);return root;
-}

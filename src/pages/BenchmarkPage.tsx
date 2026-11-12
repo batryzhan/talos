@@ -4,9 +4,10 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { useT } from '@/i18n';
 import { M0Lab } from '@/features/benchmark/M0Lab';
 import { PhysicalTab } from '@/features/benchmark/PhysicalTab';
+import { S1Lab } from '@/features/benchmark/S1Lab';
 import { useBenchStore } from '@/features/benchmark/benchStore';
 
-/** Benchmark M0 — the research lab (no 3D scene). */
+/** Benchmark M0 / S1 — the research lab (no 3D scene). */
 export default function BenchmarkPage(): JSX.Element {
   const t = useT();
   const error = useBenchStore(s => s.error);
@@ -24,11 +25,13 @@ export default function BenchmarkPage(): JSX.Element {
             </div>
             <TabsList>
               <TabsTrigger value="m0">{t('bench.tab.m0')}</TabsTrigger>
+              <TabsTrigger value="s1">{t('bench.tab.s1')}</TabsTrigger>
               <TabsTrigger value="physical">{t('bench.tab.physical')}</TabsTrigger>
             </TabsList>
           </div>
           {error && <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
           <TabsContent value="m0"><M0Lab /></TabsContent>
+          <TabsContent value="s1"><S1Lab /></TabsContent>
           <TabsContent value="physical"><PhysicalTab /></TabsContent>
         </Tabs>
       </main>
