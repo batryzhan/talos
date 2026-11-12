@@ -14,15 +14,18 @@ import { useMediaQuery } from '@/lib/use-media-query';
 import { useUiStore, type Lang } from '@/store/ui';
 import type { ThemeName } from '@/design/tokens';
 import { usePadValue } from '@/features/sim/pad';
+import { LOGO_URL } from '@/robot/logo';
 import { NAV_ITEMS, type RouteId } from './missions';
 
 function Logo(): JSX.Element {
+  // The mark is an alpha mask, so it follows the theme colour (dark and light).
+  const url = `url(${LOGO_URL})`;
   return (
-    <svg viewBox="0 0 24 24" className="size-5 text-primary" aria-hidden>
-      <path d="M12 2.5 20.5 7.5v9L12 21.5 3.5 16.5v-9Z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
-      <circle cx="12" cy="12" r="2.4" fill="currentColor" />
-      <path d="M12 9.6V5.2M14.1 13.2l3.8 2.2M9.9 13.2l-3.8 2.2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-    </svg>
+    <span
+      aria-hidden
+      className="inline-block size-6 bg-primary"
+      style={{ WebkitMaskImage: url, maskImage: url, WebkitMaskSize: 'contain', maskSize: 'contain', WebkitMaskRepeat: 'no-repeat', maskRepeat: 'no-repeat', WebkitMaskPosition: 'center', maskPosition: 'center' }}
+    />
   );
 }
 
@@ -106,6 +109,7 @@ export function AppHeader({ current }: { current: RouteId | null }): JSX.Element
           <DropdownMenuLabel className="flex items-center gap-1.5"><Languages className="size-3" aria-hidden />{t('header.language')}</DropdownMenuLabel>
           <DropdownMenuRadioGroup value={lang} onValueChange={v => setLang(v as Lang)}>
             <DropdownMenuRadioItem value="ru">Русский</DropdownMenuRadioItem>
+            <DropdownMenuRadioItem value="kk">Қазақша</DropdownMenuRadioItem>
             <DropdownMenuRadioItem value="en">English</DropdownMenuRadioItem>
           </DropdownMenuRadioGroup>
         </DropdownMenuContent>

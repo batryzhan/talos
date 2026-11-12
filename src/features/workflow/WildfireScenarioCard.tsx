@@ -33,7 +33,7 @@ export default function WildfireScenarioCard(): JSX.Element {
         <BrigadeList brigades={BRIGADES} />
         {k && (
           <div className="space-y-1 border-t pt-2">
-            <Fact label={t('wildfire.firebreak')} value={`${fmt(k.firebreakCells * 4, 0)} м²`} />
+            <Fact label={t('wildfire.firebreak')} value={`${fmt(k.firebreakCells * 4, 0)} ${t('unit.m')}²`} />
             <Fact label={t('wildfire.refills')} value={k.refills} />
             <Fact label={t('wf.replans')} value={k.replans} />
             <Fact label={t('wf.updates')} value={k.updates} />

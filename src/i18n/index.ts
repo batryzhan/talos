@@ -1,14 +1,15 @@
 import { useCallback } from 'react';
 import { ru, type MessageKey } from './ru';
 import { en } from './en';
+import { kk } from './kk';
 import { useUiStore } from '@/store/ui';
 
-export type Lang = 'ru' | 'en';
+export type Lang = 'ru' | 'en' | 'kk';
 export type { MessageKey };
 export type Vars = Record<string, string | number>;
 export type Translate = (key: MessageKey, vars?: Vars) => string;
 
-const DICTIONARIES: Readonly<Record<Lang, Readonly<Record<MessageKey, string>>>> = { ru, en };
+const DICTIONARIES: Readonly<Record<Lang, Readonly<Record<MessageKey, string>>>> = { ru, en, kk };
 
 /** Look up `key` and substitute `{name}` placeholders. */
 export function translate(lang: Lang, key: MessageKey, vars?: Vars): string {

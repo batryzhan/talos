@@ -54,7 +54,7 @@ function WildfireActions({ ready }: { ready: boolean }): JSX.Element {
       <div className="space-y-1.5">
         <div className="flex items-baseline justify-between">
           <Label htmlFor={id} className="caption">{t('controls.wind')}</Label>
-          <span className="num text-xs">{wind.toFixed(1)} м/с</span>
+          <span className="num text-xs">{wind.toFixed(1)} {t('unit.mps')}</span>
         </div>
         <Slider id={id} min={0} max={14} step={0.5} value={[wind]} onValueChange={([v]) => { const w = m(); if (w) w.wind = v; }} thumbLabel={t('controls.wind')} />
       </div>

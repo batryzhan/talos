@@ -13,6 +13,7 @@ import * as T from 'three';
 import type { SwarmAgent } from '../../core/agents/SwarmAgent';
 import type { ModuleCapability } from '../../core/agents/taskModule';
 import { STRAFER } from '../../core/agents/SwarmAgent';
+import { logoTexture } from '../../robot/logo';
 import { box, mecanumWheel, merge } from './geometry';
 import { MODULE_HEIGHT, MODULE_PARTS, createPoseScratch, pose, type MaterialKey, type PartSpec, type PoseScratch } from './modules';
 
@@ -77,6 +78,19 @@ export class FleetRenderer {
       ...[[0.168, 0.1], [0.168, -0.1], [-0.168, 0.1], [-0.168, -0.1]].map(([x, y]) => box(0.05, 0.05, 0.09, x - Math.sign(x) * 0.06, y, 0.06)),
     ]);
     this.addPart({ material: 'graphite', geometry: () => frame }, chassisMat, null, -1, n);
+    // TALOS mark on both outer faces of the side channels (tests / workers have no DOM → skipped).
+    const logoMap = logoTexture();
+    if (logoMap) {
+      const side = (sy: 1 | -1): T.BufferGeometry => {
+        const g = new T.PlaneGeometry(0.042, 0.042).toNonIndexed();
+        g.rotateX(Math.PI / 2); // normal −y
+        if (sy > 0) g.rotateZ(Math.PI);
+        return g.translate(0, sy * 0.1806, 0.07);
+      };
+      const decal = merge([side(1), side(-1)]);
+      const decalMat = new T.MeshStandardMaterial({ map: logoMap, transparent: true, alphaTest: 0.35, roughness: 0.6, metalness: 0.1, polygonOffset: true, polygonOffsetFactor: -2 });
+      this.addPart({ material: 'graphite', geometry: () => decal }, decalMat, null, -1, n);
+    }
     const wheelGeo = mecanumWheel();
     const wheelMat = new T.MeshStandardMaterial({ vertexColors: true, metalness: 0.4, roughness: 0.55 });
     const corners: [number, number][] = [[STRAFER.a, STRAFER.b], [STRAFER.a, -STRAFER.b], [-STRAFER.a, STRAFER.b], [-STRAFER.a, -STRAFER.b]];

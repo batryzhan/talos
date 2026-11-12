@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TooltipProvider } from '../../src/components/ui/tooltip';
+import { useUiStore } from '../../src/store/ui';
 import { FleetTable } from '../../src/features/telemetry/FleetTable';
 import { buildFleetRows, createTrendBuffers, rhoTone, stateTone, type FleetRow, type FleetSource } from '../../src/features/telemetry/rows';
 
@@ -25,6 +26,7 @@ function renderTable(onSelect = vi.fn(), selectedId: number | null = null) {
 const bodyRows = (): HTMLElement[] => within(screen.getByRole('table')).getAllByRole('row').slice(1);
 
 describe('FleetTable', () => {
+  beforeEach(() => useUiStore.setState({ lang: 'ru' }));
   it('renders one row per robot with status badges, units and placeholders', () => {
     renderTable();
     expect(screen.getAllByRole('columnheader').map(h => h.textContent)).toEqual(

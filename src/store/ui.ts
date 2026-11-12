@@ -3,7 +3,7 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 import type { ThemeName } from '@/design/tokens';
 import type { ControllerKind } from '@/contracts/types';
 
-export type Lang = 'ru' | 'en';
+export type Lang = 'ru' | 'en' | 'kk';
 export type CameraMode = 'orbit' | 'top' | 'auto';
 /** What the camera follows and the telemetry table highlights. */
 export type Selection = { kind: 'agent'; id: number } | { kind: 'team'; id: string } | null;
@@ -59,7 +59,7 @@ export const useUiStore = create<UiState>()(
   persist(
     set => ({
       theme: 'dark',
-      lang: 'ru',
+      lang: 'kk',
       leftOpen: true,
       bottomOpen: true,
       overlay: false,
@@ -96,7 +96,9 @@ export const useUiStore = create<UiState>()(
     }),
     {
       name: 'talos-ui',
-      version: 1,
+      version: 2,
+      // v2: Kazakh became the default language — reset the stored language once.
+      migrate: (persisted, version) => (version < 2 ? { ...(persisted as object), lang: 'kk' } : persisted) as UiState,
       storage: createJSONStorage(() => localStorage),
       partialize: s => ({ theme: s.theme, lang: s.lang, leftOpen: s.leftOpen, bottomOpen: s.bottomOpen, overlay: s.overlay }),
     },

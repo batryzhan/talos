@@ -9,6 +9,7 @@
  * Debug views (acceptance gate): 'identity' paints each identity a flat false colour, 'roughness'
  * and 'metalness' show that channel as grey — toggled globally with setMaterialDebugView().
  */
+import { LOGO_URL } from './logo';
 import * as THREE from 'three';
 
 export type MaterialIdentity =
@@ -132,13 +133,17 @@ export function talosLetteringMaterial(): THREE.MeshStandardMaterial | null {
   if (!g) return (letteringMaterial = null);
   g.fillStyle = '#0e0f11'; g.fillRect(0, 0, c.width, c.height);
   g.fillStyle = '#f1f5f9';
-  g.font = '800 92px "Segoe UI", Roboto, Arial, sans-serif';
+  g.font = '800 74px "Segoe UI", Roboto, Arial, sans-serif';
   g.textBaseline = 'middle'; g.textAlign = 'center';
   const spaced = g as CanvasRenderingContext2D & { letterSpacing?: string };
-  if ('letterSpacing' in spaced) spaced.letterSpacing = '18px';
-  g.fillText('TALOS', c.width / 2, c.height / 2 + 4);
+  if ('letterSpacing' in spaced) spaced.letterSpacing = '12px';
+  g.fillText('TALOS', 310, c.height / 2 + 4);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   t.anisotropy = 8;
+  // TALOS mark on the left of the plate; drawn once the image arrives.
+  const logo = new Image();
+  logo.onload = () => { g.drawImage(logo, 16, 10, 108, 108); t.needsUpdate = true; };
+  logo.src = LOGO_URL;
   return (letteringMaterial = new THREE.MeshStandardMaterial({ map: t, roughness: 0.85, metalness: 0.05 }));
 }

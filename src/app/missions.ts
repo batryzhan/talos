@@ -62,8 +62,8 @@ export const MISSIONS: readonly MissionDef[] = [
   {
     id: 'mining', mode: 4, path: '/mining', icon: Pickaxe,
     label: 'nav.mining', hint: 'nav.mining.hint', description: 'scenario.mining',
-    camera: { position: [-22, -46, 38], target: [-4, -8, 0] }, fog: [60, 170], sun: 0.06, hemisphere: 0.12,
-    sky: 0x030405, ibl: 'none', sunPosition: [10, -18, 60], shadowExtent: 70, maxDistance: 170,
+    camera: { position: [-22, -46, 38], target: [-4, -8, 0] }, fog: [60, 170], sun: 0.7, hemisphere: 1.6,
+    sky: 0x1b2026, ibl: 'none', sunPosition: [10, -18, 60], shadowExtent: 70, maxDistance: 170,
   },
 ];
 

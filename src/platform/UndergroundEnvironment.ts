@@ -145,7 +145,7 @@ export class MiningView implements MissionView {
           const out = 1 + jag / Math.max(1, Math.hypot(lat, z - 1));
           pos.push(cx + nx * lat * out, cy + ny * lat * out, z * (z > 0 ? out : 1));
           const coal = face && s > L - 6 && z > 0.5 && z < 1.7;
-          const tone = 0.13 + hash(cx * 0.7, cy * 0.7, z * 2) * 0.07;
+          const tone = 0.22 + hash(cx * 0.7, cy * 0.7, z * 2) * 0.1;
           if (coal) col.push(0.03, 0.03, 0.035); else col.push(tone * 1.15, tone, tone * 0.85);
           edgeAttr.push(e.id);
         }
@@ -192,6 +192,10 @@ export class MiningView implements MissionView {
     const shellMesh = new T.Mesh(shellGeo, rock), floorMesh = new T.Mesh(floorGeo, floorMat);
     shellMesh.receiveShadow = floorMesh.receiveShadow = true;
     this.root.add(shellMesh, floorMesh);
+    // Solid rock mass around the drifts: a lit slab so the cut-away reads as rock, not a black void.
+    const mass = new T.Mesh(new T.PlaneGeometry(220, 220), new T.MeshStandardMaterial({ color: 0x3a3d42, roughness: 1, metalness: 0 }));
+    mass.position.z = -0.06; mass.receiveShadow = true; mass.raycast = () => {};
+    this.root.add(mass);
     this.root.add(this.supports());
     this.root.add(this.veins());
     // ── shaft, cage, bunker, charging bay ──
